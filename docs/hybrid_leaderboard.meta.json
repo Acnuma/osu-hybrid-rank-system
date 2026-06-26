@@ -1,8 +1,11 @@
 {
-  "generated_utc": "2026-06-26T13:41:31Z",
-  "players": 9999,
+  "generated_utc": "2026-06-26T18:06:16Z",
+  "players": 4040,
   "mode": "osu",
   "bws": true,
   "weight_pp": 0.35,
-  "weight_elo": 0.65
+  "weight_elo": 0.65,
+  "min_plays": 5,
+  "exclude_provisional": false,
+  "max_score": 10000.0
 }

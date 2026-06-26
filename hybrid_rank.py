@@ -172,6 +172,49 @@ def parse_user_rows(body: str) -> list[tuple[int, str]]:
     return out
 
 
+# The ranked-play board renders each row as: name link, then Wins / Plays /
+# Rating columns (Rating is `--number-focus`, suffixed with "*" and a
+# "Provisional rating ..." title when osu! considers it not yet stable). The PP
+# board has a different column layout, so this parser is ranked-play only.
+_RP_ROW_RE = re.compile(
+    r'ranking-page-table-main__link js-usercard'
+    r'[^>]*?data-user-id="(\d+)"'              # user id
+    r'.*?>(.*?)</a>'                           # link inner html -> username
+    r'.*?col--number">\s*([\d,]+)'             # Wins
+    r'.*?col--number">\s*([\d,]+)'             # Plays
+    r'.*?col--number-focus">(.*?)</div>',      # Rating cell (carries provisional)
+    re.S,
+)
+
+
+@dataclass
+class RpRow:
+    user_id: int
+    username: str
+    plays: int
+    provisional: bool
+
+
+def parse_rp_rows(body: str) -> list[RpRow]:
+    """Return per-row ranked-play data in page order: id, name, play count, and
+    whether the rating is provisional (osu!'s own "too few recent matches" flag,
+    shown as a "*" on the board)."""
+    out: list[RpRow] = []
+    seen: set[int] = set()
+    for uid_s, inner, _wins, plays_s, focus in _RP_ROW_RE.findall(body):
+        uid = int(uid_s)
+        if uid in seen:
+            continue
+        name = _username_from_anchor(inner)
+        if not name:
+            continue
+        seen.add(uid)
+        plays = int(plays_s.replace(",", ""))
+        provisional = "*" in focus or "Provisional" in focus
+        out.append(RpRow(uid, name, plays, provisional))
+    return out
+
+
 # --------------------------------------------------------------------------- #
 # Boards
 # --------------------------------------------------------------------------- #
@@ -235,11 +278,13 @@ def get_pp_board(top_n: int, use_cache: bool) -> list[tuple[int, int, str]]:
 
 
 def get_rp_map(pool: int, max_page: int, targets: set[int],
-               use_cache: bool, max_pages: int | None) -> dict[int, int]:
-    """Build {user_id: ranked_play_rank}. Scans pages until every target id is
-    found (early stop) or the board ends. `max_pages` hard-caps the scan."""
+               use_cache: bool, max_pages: int | None
+               ) -> dict[int, tuple[int, int, bool]]:
+    """Build {user_id: (ranked_play_rank, plays, provisional)}. Scans pages until
+    every target id is found (early stop) or the board ends. `max_pages`
+    hard-caps the scan."""
     last = min(max_page, max_pages) if max_pages else max_page
-    rp: dict[int, int] = {}
+    rp: dict[int, tuple[int, int, bool]] = {}
     pages = list(range(1, last + 1))
     print(f"      scanning up to {last} ranked-play pages (pool {pool})",
           file=sys.stderr)
@@ -251,8 +296,10 @@ def get_rp_map(pool: int, max_page: int, targets: set[int],
             lambda p: f"{BASE}/rankings/ranked-play/{MODE}/{pool}?page={p}",
             lambda p: f"rp_{MODE}_{pool}_p{p}", block, use_cache, "rp",
         ):
-            for i, (uid, _name) in enumerate(parse_user_rows(body)):
-                rp.setdefault(uid, (p - 1) * PER_PAGE + i + 1)
+            for i, row in enumerate(parse_rp_rows(body)):
+                rp.setdefault(row.user_id,
+                              ((p - 1) * PER_PAGE + i + 1, row.plays,
+                               row.provisional))
         if targets and targets.issubset(rp.keys()):
             print("      all target players found; stopping early",
                   file=sys.stderr)
@@ -260,25 +307,28 @@ def get_rp_map(pool: int, max_page: int, targets: set[int],
     return rp
 
 
-def get_rp_board(pool: int, top_n: int, use_cache: bool) -> list[tuple[int, int, str]]:
-    """Return [(ranked_play_rank, user_id, username), ...] for the top `top_n`
-    ranked-play players. Used as the anchor list in ranked-play mode."""
+def get_rp_board(pool: int, top_n: int, use_cache: bool
+                 ) -> list[tuple[int, int, str, int, bool]]:
+    """Return [(ranked_play_rank, user_id, username, plays, provisional), ...]
+    for the top `top_n` ranked-play players. The anchor list in ranked-play
+    mode."""
     n_pages = (top_n + PER_PAGE - 1) // PER_PAGE
-    by_page: dict[int, list[tuple[int, str]]] = {}
+    by_page: dict[int, list[RpRow]] = {}
     for p, body in fetch_pages(
         lambda p: f"{BASE}/rankings/ranked-play/{MODE}/{pool}?page={p}",
         lambda p: f"rp_{MODE}_{pool}_p{p}", range(1, n_pages + 1), use_cache, "rp",
     ):
-        by_page[p] = parse_user_rows(body)
+        by_page[p] = parse_rp_rows(body)
 
-    out: list[tuple[int, int, str]] = []
+    out: list[tuple[int, int, str, int, bool]] = []
     seen: set[int] = set()
     for p in sorted(by_page):
-        for i, (uid, name) in enumerate(by_page[p]):
+        for i, row in enumerate(by_page[p]):
             rank = (p - 1) * PER_PAGE + i + 1
-            if rank <= top_n and uid not in seen:
-                seen.add(uid)
-                out.append((rank, uid, name))
+            if rank <= top_n and row.user_id not in seen:
+                seen.add(row.user_id)
+                out.append((rank, row.user_id, row.username, row.plays,
+                            row.provisional))
     return out
 
 
@@ -441,11 +491,45 @@ class Row:
     pp_rank: int
     rp_rank: int
     hybrid_score: float
+    plays: int = 0           # ranked-play match count
+    provisional: bool = False  # osu!'s "rating not yet stable" flag
     badges: int = 0          # tournament badge count (BWS mode only)
     bws_pp: float = 0.0      # badge-weighted pp rank (BWS mode only)
 
 
-def build(top_n: int, use_cache: bool, rp_max_pages: int | None) -> list[Row]:
+@dataclass
+class Filters:
+    """Data-quality / presentation knobs applied when assembling the board."""
+    min_plays: int = 1            # drop players with fewer ranked-play matches
+    exclude_provisional: bool = False  # drop players osu! flags as provisional
+    max_score: float | None = None     # drop rows whose hybrid_score exceeds this
+
+    def keep_player(self, plays: int, provisional: bool) -> bool:
+        if plays < self.min_plays:
+            return False
+        if self.exclude_provisional and provisional:
+            return False
+        return True
+
+
+def _finalize(rows: list[Row], filt: Filters) -> tuple[list[Row], int]:
+    """Sort by hybrid score, apply the score cap, assign hybrid ranks. Returns
+    (rows, n_capped). The cap just truncates the tail, since rows are already
+    ordered by score -- so capping at a score is identical to capping at a row
+    count; it's an honest 'we only publish the confident region' trim."""
+    rows.sort(key=lambda r: (r.hybrid_score, r.rp_rank, r.pp_rank, r.user_id))
+    capped = 0
+    if filt.max_score is not None:
+        kept = [r for r in rows if r.hybrid_score <= filt.max_score]
+        capped = len(rows) - len(kept)
+        rows = kept
+    for i, r in enumerate(rows, 1):
+        r.hybrid_rank = i
+    return rows, capped
+
+
+def build(top_n: int, use_cache: bool, rp_max_pages: int | None,
+          filt: Filters) -> list[Row]:
     print(f"[1/3] PP board: top {top_n} ...", file=sys.stderr)
     pp = get_pp_board(top_n, use_cache)
     print(f"      got {len(pp)} players", file=sys.stderr)
@@ -459,24 +543,28 @@ def build(top_n: int, use_cache: bool, rp_max_pages: int | None) -> list[Row]:
     print("[3/3] Blending and ranking ...", file=sys.stderr)
     rows: list[Row] = []
     skipped = 0
+    filtered = 0
     for pp_rank, uid, name in pp:
-        rp_rank = rp.get(uid)
-        if rp_rank is None:                       # no ranked-play rank -> skip
+        entry = rp.get(uid)
+        if entry is None:                         # no ranked-play rank -> skip
             skipped += 1
             continue
+        rp_rank, plays, provisional = entry
+        if not filt.keep_player(plays, provisional):
+            filtered += 1
+            continue
         score = W_PP * pp_rank + W_RP * rp_rank
-        rows.append(Row(0, uid, name, pp_rank, rp_rank, score))
+        rows.append(Row(0, uid, name, pp_rank, rp_rank, score, plays, provisional))
 
-    rows.sort(key=lambda r: (r.hybrid_score, r.rp_rank, r.pp_rank, r.user_id))
-    for i, r in enumerate(rows, 1):
-        r.hybrid_rank = i
-
-    print(f"      ranked {len(rows)} | skipped {skipped} (no ranked play)",
+    rows, capped = _finalize(rows, filt)
+    print(f"      ranked {len(rows)} | skipped {skipped} (no ranked play) | "
+          f"filtered {filtered} (min-plays/provisional) | capped {capped} (max-score)",
           file=sys.stderr)
     return rows
 
 
-def build_rankedplay(top_n: int, use_cache: bool, bws: bool = False) -> list[Row]:
+def build_rankedplay(top_n: int, use_cache: bool, filt: Filters,
+                     bws: bool = False) -> list[Row]:
     """Ranked-play-anchored: take the top `top_n` ranked-play players and blend
     in each one's pp rank. Players with no pp global rank are skipped.
 
@@ -496,13 +584,13 @@ def build_rankedplay(top_n: int, use_cache: bool, bws: bool = False) -> list[Row
         # badges only come from the profile, so we fetch one for everyone.
         bulk_pp = {uid: r for r, uid, _ in get_pp_board(PP_RANK_CAP, use_cache)}
         print(f"      fetching {len(rp)} profiles for badges", file=sys.stderr)
-        prof = fetch_profiles([uid for _, uid, _ in rp], use_cache)
+        prof = fetch_profiles([uid for _, uid, _, _, _ in rp], use_cache)
     else:
         print("[2/3] PP ranks for those players ...", file=sys.stderr)
         # Fast path: the bulk pp board already gives pp rank for anyone in the
         # PP top-10k, so we only pay a per-profile fetch for those outside it.
         pp_map = {uid: r for r, uid, _ in get_pp_board(PP_RANK_CAP, use_cache)}
-        need = [uid for _, uid, _ in rp if uid not in pp_map]
+        need = [uid for _, uid, _, _, _ in rp if uid not in pp_map]
         print(f"      {len(rp) - len(need)} found on bulk pp board; "
               f"fetching {len(need)} profiles for the rest", file=sys.stderr)
         for uid, r in fetch_profile_pp_ranks(need, use_cache).items():
@@ -512,7 +600,11 @@ def build_rankedplay(top_n: int, use_cache: bool, bws: bool = False) -> list[Row
     print("[3/3] Blending and ranking ...", file=sys.stderr)
     rows: list[Row] = []
     skipped = 0
-    for rp_rank, uid, name in rp:
+    filtered = 0
+    for rp_rank, uid, name, plays, provisional in rp:
+        if not filt.keep_player(plays, provisional):
+            filtered += 1
+            continue
         if bws:
             prof_pp, badges = prof.get(uid, (None, 0))
             pp_rank = bulk_pp.get(uid, prof_pp)
@@ -523,26 +615,27 @@ def build_rankedplay(top_n: int, use_cache: bool, bws: bool = False) -> list[Row
             continue
         bws_pp = bws_rank(pp_rank, badges) if bws else float(pp_rank)
         score = W_PP * bws_pp + W_RP * rp_rank
-        rows.append(Row(0, uid, name, pp_rank, rp_rank, score, badges, bws_pp))
+        rows.append(Row(0, uid, name, pp_rank, rp_rank, score, plays,
+                        provisional, badges, bws_pp))
 
-    rows.sort(key=lambda r: (r.hybrid_score, r.rp_rank, r.pp_rank, r.user_id))
-    for i, r in enumerate(rows, 1):
-        r.hybrid_rank = i
-
+    rows, capped = _finalize(rows, filt)
+    tail = (f"filtered {filtered} (min-plays/provisional) | "
+            f"capped {capped} (max-score)")
     if bws:
         with_badges = sum(1 for r in rows if r.badges)
         print(f"      ranked {len(rows)} | skipped {skipped} (no pp rank) | "
-              f"{with_badges} with tournament badges", file=sys.stderr)
+              f"{tail} | {with_badges} with tournament badges", file=sys.stderr)
     else:
-        print(f"      ranked {len(rows)} | skipped {skipped} (no pp rank)",
-              file=sys.stderr)
+        print(f"      ranked {len(rows)} | skipped {skipped} (no pp rank) | "
+              f"{tail}", file=sys.stderr)
     return rows
 
 
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
-def _write_meta(csv_path: str, players: int, bws: bool) -> None:
+def _write_meta(csv_path: str, players: int, bws: bool,
+                filt: Filters | None = None) -> None:
     """Write a sidecar `<name>.meta.json` stamped with the generation time.
 
     The website reads this (not the HTTP Last-Modified header) to show when the
@@ -550,18 +643,26 @@ def _write_meta(csv_path: str, players: int, bws: bool) -> None:
     only -- never website/code deploys.
     """
     meta_path = os.path.splitext(csv_path)[0] + ".meta.json"
+    payload = {
+        "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "players": players,
+        "mode": MODE,
+        "bws": bws,
+        "weight_pp": round(W_PP, 4),
+        "weight_elo": round(W_RP, 4),
+    }
+    if bws:
+        payload["bws_base"] = round(BWS_BASE, 4)
+    if filt is not None:
+        payload["min_plays"] = filt.min_plays
+        payload["exclude_provisional"] = filt.exclude_provisional
+        payload["max_score"] = filt.max_score
     with open(meta_path, "w", encoding="utf-8") as fh:
-        json.dump({
-            "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "players": players,
-            "mode": MODE,
-            "bws": bws,
-            "weight_pp": round(W_PP, 4),
-            "weight_elo": round(W_RP, 4),
-        }, fh, indent=2)
+        json.dump(payload, fh, indent=2)
 
 
-def write_csv(rows: list[Row], path: str, bws: bool = False) -> str:
+def write_csv(rows: list[Row], path: str, bws: bool = False,
+              filt: Filters | None = None) -> str:
     try:
         fh = open(path, "w", newline="", encoding="utf-8")
     except PermissionError:
@@ -576,42 +677,46 @@ def write_csv(rows: list[Row], path: str, bws: bool = False) -> str:
         w = csv.writer(fh)
         if bws:
             w.writerow(["hybrid_rank", "user_id", "username", "pp_rank",
-                        "badges", "bws_pp_rank", "elo_rank",
-                        "hybrid_score"])
+                        "badges", "bws_pp_rank", "elo_rank", "plays",
+                        "provisional", "hybrid_score"])
             for r in rows:
                 w.writerow([r.hybrid_rank, r.user_id, r.username, r.pp_rank,
-                            r.badges, f"{r.bws_pp:.1f}", r.rp_rank,
-                            f"{r.hybrid_score:.2f}"])
+                            r.badges, f"{r.bws_pp:.1f}", r.rp_rank, r.plays,
+                            "yes" if r.provisional else "", f"{r.hybrid_score:.2f}"])
         else:
             w.writerow(["hybrid_rank", "user_id", "username", "pp_rank",
-                        "elo_rank", "hybrid_score"])
+                        "elo_rank", "plays", "provisional", "hybrid_score"])
             for r in rows:
                 w.writerow([r.hybrid_rank, r.user_id, r.username, r.pp_rank,
-                            r.rp_rank, f"{r.hybrid_score:.2f}"])
-    _write_meta(path, len(rows), bws)
+                            r.rp_rank, r.plays, "yes" if r.provisional else "",
+                            f"{r.hybrid_score:.2f}"])
+    _write_meta(path, len(rows), bws, filt)
     return path
 
 
 def print_table(rows: list[Row], limit: int, bws: bool = False) -> None:
     if bws:
         print(f"\n{'#':>5}  {'user':<18} {'pp':>6} {'bdg':>4} {'bws':>8} "
-              f"{'elo':>6} {'score':>9}")
-        print("-" * 64)
+              f"{'elo':>6} {'play':>5} {'score':>9}")
+        print("-" * 70)
         for r in rows[:limit]:
+            mark = "*" if r.provisional else " "
             print(f"{r.hybrid_rank:>5}  {r.username[:18]:<18} {r.pp_rank:>6} "
                   f"{r.badges:>4} {r.bws_pp:>8.0f} {r.rp_rank:>6} "
-                  f"{r.hybrid_score:>9.1f}")
+                  f"{r.plays:>4}{mark} {r.hybrid_score:>9.1f}")
     else:
-        print(f"\n{'#':>5}  {'user':<18} {'pp':>6} {'elo':>6} {'score':>9}")
-        print("-" * 50)
+        print(f"\n{'#':>5}  {'user':<18} {'pp':>6} {'elo':>6} {'play':>5} "
+              f"{'score':>9}")
+        print("-" * 56)
         for r in rows[:limit]:
+            mark = "*" if r.provisional else " "
             print(f"{r.hybrid_rank:>5}  {r.username[:18]:<18} {r.pp_rank:>6} "
-                  f"{r.rp_rank:>6} {r.hybrid_score:>9.1f}")
+                  f"{r.rp_rank:>6} {r.plays:>4}{mark} {r.hybrid_score:>9.1f}")
 
 
 # --------------------------------------------------------------------------- #
 def main() -> None:
-    global W_PP, W_RP, ALLOW_STALE
+    global W_PP, W_RP, ALLOW_STALE, BWS_BASE
     ap = argparse.ArgumentParser(description="osu! hybrid PP / ranked-play leaderboard")
     ap.add_argument("--anchor", choices=("rankedplay", "pp"), default="rankedplay",
                     help="which board defines the player set: 'rankedplay' (top-N "
@@ -619,10 +724,14 @@ def main() -> None:
                          "or 'pp' (top-N PP players, capped at 10k)")
     ap.add_argument("-n", "--top", type=int, default=TOP_N,
                     help=f"how many anchor players to pull (default {TOP_N})")
-    ap.add_argument("--bws", action="store_true",
+    ap.add_argument("--bws", nargs="?", type=float, const=BWS_BASE, default=None,
+                    metavar="BASE",
                     help="badge-weighted seeding: weight the pp axis by tournament "
                          "badge count (rankedplay anchor only). Fetches a profile "
-                         "for every anchored player to read badges.")
+                         "for every anchored player to read badges. Bare --bws uses "
+                         f"the standard base {BWS_BASE}; pass a value (e.g. --bws 0.99) "
+                         "to tune how hard each badge pulls the pp rank toward #1 "
+                         "(lower = stronger; must be in (0, 1]).")
     ap.add_argument("--no-cache", action="store_true",
                     help="ignore disk cache, always re-fetch")
     ap.add_argument("--offline", action="store_true",
@@ -633,6 +742,20 @@ def main() -> None:
                     help="cap ranked-play pages scanned (players beyond the cap "
                          "are treated as unranked). Default: scan until all "
                          "target players are found or the board ends")
+    ap.add_argument("--min-plays", type=int, default=1, metavar="N",
+                    help="drop players with fewer than N ranked-play matches; "
+                         "their elo is too noisy to trust. Default 1 (off, keep "
+                         "everyone) -- opt in explicitly, e.g. --min-plays 5 to "
+                         "cut the noisiest accounts. Raise it as the feature "
+                         "matures and play counts grow.")
+    ap.add_argument("--exclude-provisional", action="store_true",
+                    help="drop players osu! flags as provisional (rating not yet "
+                         "stable). Off by default: provisional players are kept "
+                         "and marked in the 'provisional' CSV column instead.")
+    ap.add_argument("--max-score", type=float, default=None, metavar="S",
+                    help="presentation cap: drop rows whose hybrid_score exceeds "
+                         "S (the low-confidence tail). Since rows are ordered by "
+                         "score, this is identical to keeping the top-K players.")
     ap.add_argument("--w-pp", type=float, default=W_PP, metavar="0..1",
                     help=f"weight on pp rank; elo gets 1 - w_pp (default {W_PP}). "
                          "The single weight knob.")
@@ -646,24 +769,38 @@ def main() -> None:
     W_PP = args.w_pp
     W_RP = 1.0 - W_PP
 
+    if args.min_plays < 1:
+        ap.error(f"--min-plays must be >= 1 (got {args.min_plays})")
+    filt = Filters(min_plays=args.min_plays,
+                   exclude_provisional=args.exclude_provisional,
+                   max_score=args.max_score)
+
+    # --bws is optional-valued: absent -> off; bare -> standard base; with a
+    # value -> that base. Setting the global keeps bws_rank() reading one source.
+    bws_on = args.bws is not None
+    if bws_on:
+        if not 0.0 < args.bws <= 1.0:
+            ap.error(f"--bws base must be in (0, 1] (got {args.bws})")
+        BWS_BASE = args.bws
+
     if args.offline:
         ALLOW_STALE = True
         print("  (offline: reusing cached data regardless of age)", file=sys.stderr)
 
-    if args.bws and args.anchor != "rankedplay":
+    if bws_on and args.anchor != "rankedplay":
         print("  ! --bws is only wired for --anchor rankedplay; ignoring it",
               file=sys.stderr)
-        args.bws = False
+        bws_on = False
 
     t0 = time.time()
     if args.anchor == "rankedplay":
         rows = build_rankedplay(args.top, use_cache=not args.no_cache,
-                                bws=args.bws)
+                                filt=filt, bws=bws_on)
     else:
         rows = build(args.top, use_cache=not args.no_cache,
-                     rp_max_pages=args.rp_max_pages)
-    out_path = write_csv(rows, args.out, bws=args.bws)
-    print_table(rows, args.show, bws=args.bws)
+                     rp_max_pages=args.rp_max_pages, filt=filt)
+    out_path = write_csv(rows, args.out, bws=bws_on, filt=filt)
+    print_table(rows, args.show, bws=bws_on)
     print(f"\nWrote {len(rows)} rows -> {out_path}  ({time.time()-t0:.0f}s)",
           file=sys.stderr)
 

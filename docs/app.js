@@ -2,7 +2,7 @@
 
 // The leaderboard CSV lives next to this file (GitHub Pages serves /docs as the
 // site root, so the data must sit inside it). Regenerate with:
-//   python hybrid_rank.py --top 10000 --bws --out docs/hybrid_leaderboard.csv
+//   python hybrid_rank.py --anchor rankedplay --top 10000 --bws --min-plays 5 --max-score 10000 --out docs/hybrid_leaderboard.csv
 const CSV_URL = "hybrid_leaderboard.csv";
 // Sidecar written by hybrid_rank.py at generation time. We read the date from
 // HERE (not the HTTP Last-Modified header) so the "updated" stamp reflects only
@@ -36,6 +36,9 @@ function parseCSV(text) {
     }
     // how many places the player ranks higher (+) or lower (-) than PP alone
     obj.pp_delta = obj.pp_rank - obj.hybrid_rank;
+    // osu! flags ratings with too few recent matches as provisional ("yes" in
+    // the CSV); coerce to a boolean. Absent on older CSVs -> false.
+    obj.provisional = obj.provisional === "yes";
     out[i - 1] = obj;
   }
   return out;
@@ -65,7 +68,7 @@ function rowHTML(r) {
     deltaCell(r.pp_delta) +
     `<td class="${badgeCls}">${r.badges}</td>` +
     `<td>${fmt("bws_pp_rank", r.bws_pp_rank)}</td>` +
-    `<td>${fmt("elo_rank", r.elo_rank)}</td>` +
+    `<td>${fmt("elo_rank", r.elo_rank)}${r.provisional ? `<abbr class="prov" title="Provisional rating — too few recent ranked-play matches for a stable Elo.">*</abbr>` : ""}</td>` +
     `<td class="score">${fmt("hybrid_score", r.hybrid_score)}</td>` +
     `</tr>`
   );
@@ -145,7 +148,76 @@ async function loadUpdated() {
   }
 }
 
+// --- tabs: switch between the leaderboard and the calculator views ---
+function initTabs() {
+  const tabs = document.querySelectorAll(".tab");
+  tabs.forEach((tab) => tab.addEventListener("click", () => {
+    document.body.dataset.view = tab.dataset.view;
+    tabs.forEach((t) => t.classList.toggle("is-active", t === tab));
+  }));
+}
+
+// --- calculator: same formula the board uses, evaluated live in the browser ---
+//   bws_pp = pp_rank ^ ( base ^ badges^2 )    (base = 0.9937 on the board)
+//   score  = weight * bws_pp + (1 - weight) * elo_rank   (lower = better)
+function initCalc() {
+  const pp = document.getElementById("c-pp");
+  const elo = document.getElementById("c-elo");
+  const badgesEl = document.getElementById("c-badges");
+  const baseEl = document.getElementById("c-bwsbase");
+  const weightEl = document.getElementById("c-weight");
+  const bwsOut = document.getElementById("c-bws");
+  const scoreOut = document.getElementById("c-score");
+  const formulaOut = document.getElementById("c-formula");
+  const errOut = document.getElementById("c-err");
+  if (!pp || !elo || !badgesEl || !baseEl || !weightEl) return;
+
+  const num = (v, d) => v.toLocaleString("en-US", { maximumFractionDigits: d });
+
+  function update() {
+    const ppRank = parseFloat(pp.value);
+    const eloRank = parseFloat(elo.value);
+    const badges = parseInt(badgesEl.value, 10);
+    const base = parseFloat(baseEl.value);
+    const weight = parseFloat(weightEl.value);
+
+    let problem = "";
+    if (!(ppRank >= 1)) problem = "PP rank must be 1 or greater.";
+    else if (!(eloRank >= 1)) problem = "Elo rank must be 1 or greater.";
+    else if (!(badges >= 0)) problem = "Badges must be 0 or greater.";
+    else if (!(base > 0 && base <= 1)) problem = "BWS base must be greater than 0 and at most 1.";
+    else if (!(weight >= 0 && weight <= 1)) problem = "Weight must be between 0 and 1.";
+
+    if (problem) {
+      bwsOut.textContent = "—";
+      scoreOut.textContent = "—";
+      formulaOut.textContent = "";
+      errOut.textContent = problem;
+      errOut.hidden = false;
+      return;
+    }
+    errOut.hidden = true;
+
+    const bws = Math.pow(ppRank, Math.pow(base, badges * badges));
+    const score = weight * bws + (1 - weight) * eloRank;
+    const rest = 1 - weight;
+
+    bwsOut.textContent = num(bws, 1);
+    scoreOut.textContent = num(score, 2);
+    formulaOut.textContent =
+      `score = ${weight} × ( ${num(ppRank, 0)} ^ ( ${base} ^ ( ${badges} ^ 2 ) ) ) + ${rest} × ${num(eloRank, 0)}\n` +
+      `      = ${weight} × ${num(bws, 2)} + ${rest} × ${num(eloRank, 0)}\n` +
+      `      = ${num(score, 2)}`;
+  }
+
+  [pp, elo, badgesEl, baseEl, weightEl].forEach((el) =>
+    el.addEventListener("input", update));
+  update();
+}
+
 async function init() {
+  initTabs();
+  initCalc();
   loadUpdated();
   document.querySelectorAll("thead th").forEach((th) =>
     th.addEventListener("click", () => onHeaderClick(th)));

@@ -24,15 +24,23 @@
   .sub a { color: var(--accent); text-decoration: none; }
   .sub a:hover { text-decoration: underline; }
   .sub code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  ul.limitations, ol.limitations {
+    color: var(--dim); font-size: 13px; max-width: 78ch; line-height: 1.6;
+    margin: 6px 0 12px; padding-left: 20px;
+  }
+  ul.limitations li, ol.limitations li { margin: 8px 0; }
+  ul.limitations strong, ol.limitations strong { color: var(--txt); font-weight: 600; }
+  ul.limitations a, ol.limitations a { color: var(--accent); text-decoration: none; }
+  ul.limitations a:hover, ol.limitations a:hover { text-decoration: underline; }
   .formula-label { margin: 12px 0 6px; font-size: 13px; font-weight: 600; color: var(--txt); }
   .formula {
-    width: fit-content; max-width: 100%; margin: 0 0 14px; padding: 12px 16px;
+    width: fit-content; max-width: 100%; margin: 0 0 14px; padding: 12px 0;
     background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
     overflow-x: auto;
   }
   .formula code {
-    display: block; white-space: pre; font-size: 15px; color: var(--txt);
-    line-height: 1.8;
+    display: block; width: max-content; white-space: pre; font-size: 12px;
+    color: var(--txt); line-height: 1.8; padding: 0 16px;
   }
   .formula .note {
     display: block; margin-top: 8px; font-size: 12px; color: var(--dim);
@@ -84,6 +92,10 @@
   a.user:hover { color: var(--accent); text-decoration: underline; }
   .badge { color: var(--dim); }
   .badge.has { color: var(--accent); }
+  .prov {
+    color: var(--accent); font-weight: 700; cursor: help;
+    margin-left: 2px; text-decoration: none; border: 0;
+  }
   .score { font-weight: 600; }
   td.delta { font-weight: 600; }
   td.delta.up { color: #57d977; }
@@ -101,19 +113,70 @@
     font-size: 13px; font-weight: 600;
   }
   #updated-date { color: var(--accent); }
+  /* --- tabs --- */
+  .tabs {
+    display: flex; gap: 4px; margin: 16px 0 0;
+    border-bottom: 1px solid var(--line);
+  }
+  .tab {
+    appearance: none; background: none; border: 0; cursor: pointer;
+    color: var(--dim); font: inherit; font-size: 14px; font-weight: 600;
+    padding: 9px 14px; border-bottom: 2px solid transparent; margin-bottom: -1px;
+  }
+  .tab:hover { color: var(--txt); }
+  .tab.is-active { color: var(--accent); border-bottom-color: var(--accent); }
+  body[data-view="calculator"] .lb-only { display: none; }
+  body[data-view="leaderboard"] .calc-only { display: none; }
+  /* --- calculator --- */
+  .calc { max-width: 600px; }
+  .calc-intro { margin-top: 14px; }
+  .calc-grid {
+    display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px;
+    margin: 4px 0 18px;
+  }
+  .calc-field { display: flex; flex-direction: column; gap: 6px; }
+  .calc-field > span { font-size: 13px; color: var(--dim); font-weight: 600; }
+  .calc-field input {
+    padding: 9px 12px; border-radius: 8px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--txt); font-size: 15px;
+    font-variant-numeric: tabular-nums; width: 100%;
+  }
+  .calc-field input:focus { outline: none; border-color: var(--accent-dim); }
+  .calc-out { display: flex; gap: 12px; margin: 0 0 16px; flex-wrap: wrap; }
+  .calc-stat {
+    flex: 1 1 180px; padding: 14px 16px; border-radius: 10px;
+    background: var(--panel); border: 1px solid var(--line);
+  }
+  .calc-stat-label {
+    display: block; font-size: 12px; text-transform: uppercase;
+    letter-spacing: .04em; color: var(--dim); margin-bottom: 6px;
+  }
+  .calc-stat-val {
+    font-size: 26px; font-weight: 700; font-variant-numeric: tabular-nums;
+  }
+  .calc-stat-val.accent { color: var(--accent); }
+  .calc-err { color: #ff6b6b; font-size: 13px; margin: 0; }
+  @media (max-width: 480px) { .calc-grid { grid-template-columns: 1fr; } }
 </style>
 </head>
-<body>
+<body data-view="leaderboard">
   <header>
     <h1>osu! <span class="pink">Hybrid</span> Leaderboard</h1>
-    <p class="sub">
+    <nav class="tabs" id="tabs">
+      <button class="tab is-active" data-view="leaderboard">Leaderboard</button>
+      <button class="tab" data-view="calculator">Calculator</button>
+    </nav>
+    <p class="sub lb-only">
       This leaderboard attempts to <strong>score</strong> (lower is better) the
       top 10k Ranked Play players based on their <strong>PP rank</strong>,
       <strong>Elo rank</strong> (Ranked Play rank), and participation in
       tournaments using <strong><a href="https://osu.ppy.sh/wiki/en/Tournaments/Badge-weighted_seeding" target="_blank" rel="noopener">BWS</a></strong>, with a skew towards Elo. Players
       without an Elo rank or without a PP rank do not show up on this leaderboard.
+      Moreover, players with <strong>fewer than 5 ranked plays</strong> or a
+      <strong>calculated score above 10,000</strong> are also excluded due to their stats
+      being highly inaccurate.
     </p>
-    <details class="more">
+    <details class="more lb-only">
       <summary>Show more</summary>
       <div class="more-body">
         <p class="formula-label">Formula used for this leaderboard:</p>
@@ -121,8 +184,8 @@
           <code>score = 0.35 × ( pp_rank ^ ( 0.9937 ^ ( badges ^ 2 ) ) ) + 0.65 × elo_rank</code>
         </div>
         <p class="sub">
-          The <strong>0.35 / 0.65</strong> split makes the result lean toward live
-          matchmaking <strong>Elo</strong>, while a strong <strong>PP&nbsp;rank</strong>
+          The <strong>0.35 / 0.65</strong> split makes the result lean toward 
+          <strong>Elo Rank</strong>, while a strong <strong>PP&nbsp;rank</strong>
           still lifts a player. On top of that, <strong>badge-weighted seeding (BWS)</strong>
           rewards tournament players by pulling their <strong>PP&nbsp;rank toward #1</strong>
           — only the PP side is adjusted; Elo is left untouched. The more tournament
@@ -132,9 +195,70 @@
           page</strong> are counted. The <strong>BWS</strong> column is that
           badge-adjusted PP rank that actually feeds the score. The
           <strong>vs PP</strong> column shows how many places a player gained
-          (green ▴) or lost (red ▾) compared with their PP rank alone. Click any
+          (green ▴) or lost (red ▾) compared with their PP rank alone. An
+          <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>
+          next to a player's <strong>Elo rank</strong> marks a
+          <strong>provisional</strong> rating — osu! considers it not yet stable
+          because the player has too few recent Ranked Play matches. Click any
           column header to sort.
         </p>
+        <p class="formula-label">Biggest limitations</p>
+        <ul class="limitations">
+          <li>
+            <strong>Elo is still inaccurate because too few players queue.</strong>
+            For Elo to be meaningful, players — especially those at the top —
+            need to play ranked matches relatively frequently. (This assumes the
+            Elo system itself is sound; it is brand new and still under active
+            development.)
+          </li>
+          <li>
+            <strong>Most players haven't queued even once,</strong> so they never
+            appear on this leaderboard at all.
+          </li>
+          <li>
+            <strong>Tournament badges can't be counted reliably.</strong> A
+            profile only exposes <em>how many</em> badges a player has — not
+            whether a given badge is for a tournament, how old it is, or the
+            skill level of the event. Some badges note the placement achieved,
+            many don't, and the tooltip wording on a badge is inconsistent and 
+            often in different languages, so the data can't be trusted. This
+            leaderboard approximates it by counting only badges that link to a
+            tournament forum thread or wiki page — but some tournament badges
+            link to nothing at all (e.g. <strong>Corsace</strong>), so they are
+            missed entirely.
+          </li>
+          <li>
+            <strong>The 0.35 weight (the BWS ↔ Elo skew) is debatable.</strong>
+            The board leans toward Elo because the PP side is already lifted by
+            BWS, and Elo carries a recency bias that should, in theory, make it a
+            better gauge of a player's <em>current</em> skill relative to others.
+            Even so, a different weight may be equally valid — or better.
+          </li>
+        </ul>
+        <p class="formula-label">Does a hybrid leaderboard even need to exist?</p>
+        <p class="sub">
+          If Elo were already an accurate representation of how players' skill
+          levels compare, a hybrid leaderboard might not be needed at all. The
+          two strongest arguments for its existence are:
+        </p>
+        <ol class="limitations">
+          <li>
+            <strong>PP is a good gauge of raw mechanical skill,</strong> which is
+            important in osu! and deserves to be accounted for.
+          </li>
+          <li>
+            <strong>osu! is primarily a single-player experience.</strong>
+            Even in tournaments, players never interact during gameplay — each
+            one plays alone, and the winner is decided by comparing scores. By
+            <a href="https://en.wikipedia.org/wiki/Chris_Crawford_(game_designer)" target="_blank" rel="noopener">Chris Crawford</a>'s
+            definition, that makes a tournament match a <em>competition</em>
+            rather than a <em>game</em> (though it is, of course, still a video
+            game). Since results come from each player's <em>own</em> performance
+            and not from direct play against an opponent, a purely head-to-head
+            rating like Elo can't tell the whole story by itself — so blending in
+            PP, a measure of that individual performance, is justified.
+          </li>
+        </ol>
         <p class="sub">
           Full source code, the exact badge rules and the scraper:
           <a href="https://github.com/Acnuma/osu-hybrid-rank-system" target="_blank" rel="noopener">github.com/Acnuma/osu-hybrid-rank-system</a>
@@ -143,12 +267,12 @@
     </details>
   </header>
 
-  <div class="controls">
+  <div class="controls lb-only">
     <input id="search" type="search" placeholder="Search username…" autocomplete="off">
     <span class="meta" id="meta">loading…</span>
   </div>
 
-  <div class="wrap">
+  <div class="wrap lb-only">
     <p class="updated" id="updated">Leaderboard data last updated:
       <span id="updated-date">—</span></p>
     <table id="board" hidden>
@@ -169,12 +293,60 @@
     <div class="loading" id="status">Loading leaderboard…</div>
   </div>
 
+  <section class="wrap calc-only">
+    <p class="sub calc-intro">
+      Compute a player's <strong>hybrid score</strong> — lower is better. <strong>Badge-weighted seeding (BWS)</strong>
+      pulls the PP rank toward #1, the <strong>BWS base</strong> sets how hard each
+      badge pulls (lower = stronger; the board uses <strong>0.9937</strong>), and the
+      <strong>weight</strong> sets the PP&nbsp;↔&nbsp;Elo balance (the board uses
+      <strong>0.35</strong>).
+    </p>
+    <div class="calc">
+      <div class="calc-grid">
+        <label class="calc-field">
+          <span>PP rank</span>
+          <input id="c-pp" type="number" min="1" step="1" value="1000" inputmode="numeric">
+        </label>
+        <label class="calc-field">
+          <span>Elo rank (Ranked Play)</span>
+          <input id="c-elo" type="number" min="1" step="1" value="1000" inputmode="numeric">
+        </label>
+        <label class="calc-field">
+          <span>Tournament badges</span>
+          <input id="c-badges" type="number" min="0" step="1" value="0" inputmode="numeric">
+        </label>
+        <label class="calc-field">
+          <span>BWS base (badge strength)</span>
+          <input id="c-bwsbase" type="number" min="0" max="1" step="0.0001" value="0.9937" inputmode="decimal">
+        </label>
+        <label class="calc-field">
+          <span>Weight (PP share, 0–1)</span>
+          <input id="c-weight" type="number" min="0" max="1" step="0.01" value="0.35" inputmode="decimal">
+        </label>
+      </div>
+      <div class="calc-out">
+        <div class="calc-stat">
+          <span class="calc-stat-label">BWS PP rank</span>
+          <span class="calc-stat-val" id="c-bws">—</span>
+        </div>
+        <div class="calc-stat">
+          <span class="calc-stat-label">Hybrid score</span>
+          <span class="calc-stat-val accent" id="c-score">—</span>
+        </div>
+      </div>
+      <div class="formula">
+        <code id="c-formula"></code>
+      </div>
+      <p class="calc-err" id="c-err" hidden></p>
+    </div>
+  </section>
+
   <footer>
     <p>Data scraped from public <a href="https://osu.ppy.sh">osu!</a> profiles and
       leaderboards. Not affiliated with or endorsed by osu! / ppy Pty Ltd.
       Pure standard library, no tracking.</p>
   </footer>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=3"></script>
 </body>
 </html>
