@@ -2,8 +2,12 @@
 
 // The leaderboard CSV lives next to this file (GitHub Pages serves /docs as the
 // site root, so the data must sit inside it). Regenerate with:
-//   python hybrid_rank.py --bws --offline --out docs/hybrid_leaderboard.csv
+//   python hybrid_rank.py --top 10000 --bws --out docs/hybrid_leaderboard.csv
 const CSV_URL = "hybrid_leaderboard.csv";
+// Sidecar written by hybrid_rank.py at generation time. We read the date from
+// HERE (not the HTTP Last-Modified header) so the "updated" stamp reflects only
+// LEADERBOARD DATA refreshes, never website/code deploys.
+const META_URL = "hybrid_leaderboard.meta.json";
 
 // column key -> {label, numeric}. Order here is irrelevant; the <thead> drives layout.
 const NUMERIC = new Set([
@@ -111,7 +115,28 @@ function onHeaderClick(th) {
   render();
 }
 
+// Show when the leaderboard DATA was generated (from the meta sidecar, in UTC).
+async function loadUpdated() {
+  const el = document.getElementById("updated-date");
+  if (!el) return;
+  try {
+    const res = await fetch(META_URL, { cache: "no-cache" });
+    if (!res.ok) throw new Error();
+    const meta = await res.json();
+    if (!meta.generated_utc) throw new Error();
+    const d = new Date(meta.generated_utc);
+    const date = d.toLocaleDateString("en-GB",
+      { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+    const time = d.toLocaleTimeString("en-GB",
+      { hour: "2-digit", minute: "2-digit", timeZone: "UTC" });
+    el.textContent = `${date}, ${time} UTC`;
+  } catch {
+    el.textContent = "unknown";
+  }
+}
+
 async function init() {
+  loadUpdated();
   document.querySelectorAll("thead th").forEach((th) =>
     th.addEventListener("click", () => onHeaderClick(th)));
 
@@ -127,9 +152,18 @@ async function init() {
     ROWS = parseCSV(await res.text());
     render();
   } catch (err) {
-    $("#status").textContent =
-      `Could not load ${CSV_URL} (${err.message}). ` +
-      `Make sure the CSV sits next to index.html.`;
+    if (location.protocol === "file:") {
+      $("#status").innerHTML =
+        "This page was opened directly from disk (<code>file://</code>), so the " +
+        "browser blocks loading the leaderboard file. Serve the folder over HTTP " +
+        "instead — e.g. run <code>python -m http.server</code> inside " +
+        "<code>docs/</code> and open <code>http://localhost:8000</code>. " +
+        "(On the live site this works automatically.)";
+    } else {
+      $("#status").textContent =
+        `Could not load ${CSV_URL} (${err.message}). ` +
+        `Make sure the CSV sits next to index.html.`;
+    }
   }
 }
 
