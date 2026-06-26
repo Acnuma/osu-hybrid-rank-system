@@ -249,4 +249,8 @@ arguments for its existence are:
    (though it is, of course, still a video game). Since results come from each
    player's *own* performance and not from direct play against an opponent, a
    purely head-to-head rating like Elo can't tell the whole story by itself — so
-   blending in PP, a measure of that individual performance, is justified.
+   blending in PP, a measure of that individual performance, is justified. One
+   could object that players *do* interact: they ban and pick beatmaps against
+   their opponent in tournaments and ranked play. But that's a meta-game layered
+   on top — the core gameplay loop, clicking circles to the beat for a high
+   score, plays out in isolation and is unaffected by it.
