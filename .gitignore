@@ -1,0 +1,18 @@
+# scraper cache (regenerated on demand; do not publish)
+.cache/
+
+# python
+__pycache__/
+*.pyc
+
+# local/throwaway leaderboard outputs (the published board lives in docs/)
+/hybrid_leaderboard*.csv
+
+# local tool settings (not for publishing)
+.claude/
+
+# editor / OS cruft
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
