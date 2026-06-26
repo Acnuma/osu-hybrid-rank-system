@@ -12,6 +12,7 @@ const META_URL = "hybrid_leaderboard.meta.json";
 // column key -> {label, numeric}. Order here is irrelevant; the <thead> drives layout.
 const NUMERIC = new Set([
   "hybrid_rank", "pp_rank", "badges", "bws_pp_rank", "elo_rank", "hybrid_score",
+  "pp_delta",   // derived (pp_rank - hybrid_rank), not a CSV column
 ]);
 
 let ROWS = [];                       // parsed objects
@@ -33,6 +34,8 @@ function parseCSV(text) {
       const raw = cells[c];
       obj[key] = NUMERIC.has(key) ? parseFloat(raw) : raw;
     }
+    // how many places the player ranks higher (+) or lower (-) than PP alone
+    obj.pp_delta = obj.pp_rank - obj.hybrid_rank;
     out[i - 1] = obj;
   }
   return out;
@@ -45,6 +48,12 @@ function fmt(key, val) {
   return val;
 }
 
+function deltaCell(d) {
+  if (d > 0) return `<td class="delta up">▴ +${d.toLocaleString("en-US")}</td>`;
+  if (d < 0) return `<td class="delta down">▾ ${d.toLocaleString("en-US")}</td>`;
+  return `<td class="delta zero">0</td>`;
+}
+
 function rowHTML(r) {
   const badgeCls = r.badges > 0 ? "badge has" : "badge";
   const url = `https://osu.ppy.sh/users/${r.user_id}/osu`;
@@ -53,6 +62,7 @@ function rowHTML(r) {
     `<td class="rank">${r.hybrid_rank.toLocaleString("en-US")}</td>` +
     `<td class="left"><a class="user" href="${url}" target="_blank" rel="noopener">${escapeHTML(r.username)}</a></td>` +
     `<td>${fmt("pp_rank", r.pp_rank)}</td>` +
+    deltaCell(r.pp_delta) +
     `<td class="${badgeCls}">${r.badges}</td>` +
     `<td>${fmt("bws_pp_rank", r.bws_pp_rank)}</td>` +
     `<td>${fmt("elo_rank", r.elo_rank)}</td>` +
@@ -109,8 +119,8 @@ function onHeaderClick(th) {
     sortDir *= -1;
   } else {
     sortKey = key;
-    // ranks/score read better ascending (1 = best); badges descending (more = notable)
-    sortDir = (key === "badges") ? -1 : 1;
+    // ranks/score read better ascending (1 = best); badges & vs-pp gain descending
+    sortDir = (key === "badges" || key === "pp_delta") ? -1 : 1;
   }
   render();
 }

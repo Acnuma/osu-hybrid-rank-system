@@ -85,6 +85,10 @@
   .badge { color: var(--dim); }
   .badge.has { color: var(--accent); }
   .score { font-weight: 600; }
+  td.delta { font-weight: 600; }
+  td.delta.up { color: #57d977; }
+  td.delta.down { color: #ff6b6b; }
+  td.delta.zero { color: var(--dim); font-weight: 400; }
   .loading, .empty { padding: 40px; text-align: center; color: var(--dim); }
   footer {
     max-width: 1000px; margin: 0 auto; padding: 0 20px 50px;
@@ -126,8 +130,10 @@
           dragged down by a deep PP rank. Only badges that link to a
           <strong>tournament forum thread</strong> or a <strong>wiki Tournaments
           page</strong> are counted. The <strong>BWS</strong> column is that
-          badge-adjusted PP rank that actually feeds the score. Click any column
-          header to sort.
+          badge-adjusted PP rank that actually feeds the score. The
+          <strong>vs PP</strong> column shows how many places a player gained
+          (green ▴) or lost (red ▾) compared with their PP rank alone. Click any
+          column header to sort.
         </p>
         <p class="sub">
           Full source code, the exact badge rules and the scraper:
@@ -151,6 +157,7 @@
           <th data-key="hybrid_rank" class="left sorted">#&nbsp;<span class="arrow">▲</span></th>
           <th data-key="username" class="left">Player</th>
           <th data-key="pp_rank">pp rank</th>
+          <th data-key="pp_delta" title="Places gained or lost versus PP rank alone (PP rank − hybrid rank). Green ▴ = ranks higher here than on PP.">vs pp</th>
           <th data-key="badges">badges</th>
           <th data-key="bws_pp_rank">bws</th>
           <th data-key="elo_rank">elo rank</th>
