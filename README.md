@@ -20,6 +20,8 @@ rank — both are required to compute the blended score — so the live board sh
 
 ---
 
+## Introduction
+
 Builds an osu! **hybrid global leaderboard** that blends two already-normalized
 rankings:
 
