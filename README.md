@@ -146,9 +146,9 @@ ranked-play board has no such cap — it pages fully to ~98k.)
   player who simply has a deep ranked-play rank isn't wrongly skipped).
 - So **top 10k ≈ 200 + up to ~1964 ≈ ~2200 small page fetches**, not 10k.
 - `CONCURRENCY` (default 5) and `MIN_INTERVAL` (global min seconds between
-  requests, default 0) at the top of the script tune throughput vs politeness.
+  requests, default 0.4) at the top of the script tune throughput vs politeness.
   No Cloudflare/anti-bot block was observed at these settings.
-- Pages are cached under `.cache/` for 6h, so re-runs are near-instant.
+- Pages are cached under `.cache/` for 24h, so re-runs are near-instant.
 
 ### Notes
 - Pure standard library — no `pip install`.
