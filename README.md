@@ -1,5 +1,25 @@
 # HybridRankSystem
 
+### 🏆 [**View the live leaderboard →**](https://acnuma.github.io/osu-hybrid-rank-system/)
+
+The published board is generated with:
+
+```
+python hybrid_rank.py --anchor rankedplay --top 10000 --bws --out docs/hybrid_leaderboard.csv
+```
+
+- `--anchor rankedplay` — player set = the top ranked-play (matchmaking) players
+- `--top 10000` — top 10,000 of them
+- `--bws` — badge-weighted seeding (tournament players credited)
+- weight `W_PP = 0.35` (default) → `score = 0.35 × bws_pp + 0.65 × elo_rank`
+- mode: `osu` standard
+
+A player is skipped if they lack **either** an Elo (ranked-play) rank **or** a PP
+rank — both are required to compute the blended score — so the live board shows
+~9,999 players.
+
+---
+
 Builds an osu! **hybrid global leaderboard** that blends two already-normalized
 rankings:
 
