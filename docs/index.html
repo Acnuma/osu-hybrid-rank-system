@@ -32,7 +32,7 @@
   }
   .formula code {
     display: block; white-space: pre; font-size: 15px; color: var(--txt);
-    line-height: 1.8;
+    line-height: 1.8; padding-right: 16px;
   }
   .formula .note {
     display: block; margin-top: 8px; font-size: 12px; color: var(--dim);
@@ -112,7 +112,7 @@
     <details class="more">
       <summary>Show more</summary>
       <div class="more-body">
-        <p class="formula-label">Formula:</p>
+        <p class="formula-label">Formula used on this leaderboard:</p>
         <div class="formula">
           <code>score = 0.35 × ( pp_rank ^ ( 0.9937 ^ ( badges ^ 2 ) ) ) + 0.65 × elo_rank</code>
         </div>
