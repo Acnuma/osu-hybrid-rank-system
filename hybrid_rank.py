@@ -37,6 +37,7 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -541,6 +542,25 @@ def build_rankedplay(top_n: int, use_cache: bool, bws: bool = False) -> list[Row
 # --------------------------------------------------------------------------- #
 # Output
 # --------------------------------------------------------------------------- #
+def _write_meta(csv_path: str, players: int, bws: bool) -> None:
+    """Write a sidecar `<name>.meta.json` stamped with the generation time.
+
+    The website reads this (not the HTTP Last-Modified header) to show when the
+    leaderboard DATA was last refreshed, so the stamp tracks data regenerations
+    only -- never website/code deploys.
+    """
+    meta_path = os.path.splitext(csv_path)[0] + ".meta.json"
+    with open(meta_path, "w", encoding="utf-8") as fh:
+        json.dump({
+            "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "players": players,
+            "mode": MODE,
+            "bws": bws,
+            "weight_pp": round(W_PP, 4),
+            "weight_elo": round(W_RP, 4),
+        }, fh, indent=2)
+
+
 def write_csv(rows: list[Row], path: str, bws: bool = False) -> str:
     try:
         fh = open(path, "w", newline="", encoding="utf-8")
@@ -568,6 +588,7 @@ def write_csv(rows: list[Row], path: str, bws: bool = False) -> str:
             for r in rows:
                 w.writerow([r.hybrid_rank, r.user_id, r.username, r.pp_rank,
                             r.rp_rank, f"{r.hybrid_score:.2f}"])
+    _write_meta(path, len(rows), bws)
     return path
 
 

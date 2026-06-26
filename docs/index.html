@@ -19,8 +19,34 @@
   }
   h1 { margin: 0 0 4px; font-size: 24px; }
   h1 .pink { color: var(--accent); }
-  .sub { color: var(--dim); font-size: 13px; max-width: 70ch; }
+  .sub { color: var(--dim); font-size: 13px; max-width: 78ch; margin: 6px 0; }
+  .sub strong { color: var(--txt); font-weight: 600; }
+  .sub a { color: var(--accent); text-decoration: none; }
+  .sub a:hover { text-decoration: underline; }
   .sub code { background: var(--panel); padding: 1px 5px; border-radius: 4px; }
+  .formula-label { margin: 12px 0 6px; font-size: 13px; font-weight: 600; color: var(--txt); }
+  .formula {
+    max-width: 78ch; margin: 0 0 14px; padding: 12px 16px;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    overflow-x: auto;
+  }
+  .formula code {
+    display: block; white-space: pre; font-size: 15px; color: var(--txt);
+    line-height: 1.8;
+  }
+  .formula .note {
+    display: block; margin-top: 8px; font-size: 12px; color: var(--dim);
+    white-space: normal; line-height: 1.5;
+  }
+  details.more { max-width: 78ch; margin: 4px 0; }
+  details.more > summary {
+    cursor: pointer; color: var(--accent); font-size: 13px; font-weight: 600;
+    user-select: none; width: max-content; list-style: none;
+  }
+  details.more > summary::-webkit-details-marker { display: none; }
+  details.more > summary::before { content: "▸ "; }
+  details.more[open] > summary::before { content: "▾ "; }
+  details.more > summary:hover { text-decoration: underline; }
   .controls {
     max-width: 1000px; margin: 0 auto; padding: 0 20px 14px;
     display: flex; gap: 12px; align-items: center; flex-wrap: wrap;
@@ -65,18 +91,50 @@
     color: var(--dim); font-size: 12px;
   }
   footer a { color: var(--accent-dim); }
+  footer p { margin: 5px 0; }
+  .updated {
+    max-width: 1000px; margin: 0 0 10px; color: var(--txt);
+    font-size: 13px; font-weight: 600;
+  }
+  #updated-date { color: var(--accent); }
 </style>
 </head>
 <body>
   <header>
     <h1>osu! <span class="pink">Hybrid</span> Leaderboard</h1>
     <p class="sub">
-      A blended global rank: <code>0.35 &times; pp_rank + 0.65 &times; elo_rank</code>
-      (lower is better), with optional <strong>badge-weighted seeding</strong> so
-      tournament players are credited. The <code>bws</code> column is the
-      badge-adjusted pp rank that actually feeds the score.
-      Click any column header to sort.
+      This leaderboard attempts to <strong>score</strong> (lower is better) the
+      top 10k Ranked Play players based on their <strong>PP rank</strong>,
+      <strong>Elo rank</strong> (Ranked Play rank), and participation in
+      tournaments using <strong><a href="https://osu.ppy.sh/wiki/en/Tournaments/Badge-weighted_seeding" target="_blank" rel="noopener">BWS</a></strong>, with a skew towards Elo. Players
+      without Elo do not show up on this leaderboard.
     </p>
+    <details class="more">
+      <summary>Show more</summary>
+      <div class="more-body">
+        <p class="formula-label">Formula:</p>
+        <div class="formula">
+          <code>score = 0.35 × ( pp_rank ^ ( 0.9937 ^ ( badges ^ 2 ) ) ) + 0.65 × elo_rank</code>
+        </div>
+        <p class="sub">
+          The <strong>0.35 / 0.65</strong> split makes the result lean toward live
+          matchmaking <strong>Elo</strong>, while a strong <strong>PP&nbsp;rank</strong>
+          still lifts a player. On top of that, <strong>badge-weighted seeding (BWS)</strong>
+          rewards tournament players by pulling their <strong>PP&nbsp;rank toward #1</strong>
+          — only the PP side is adjusted; Elo is left untouched. The more tournament
+          badges a player has, the bigger the lift, so a decorated player isn't
+          dragged down by a deep PP rank. Only badges that link to a
+          <strong>tournament forum thread</strong> or a <strong>wiki Tournaments
+          page</strong> are counted. The <strong>BWS</strong> column is that
+          badge-adjusted PP rank that actually feeds the score. Click any column
+          header to sort.
+        </p>
+        <p class="sub">
+          Full source code, the exact badge rules and the scraper:
+          <a href="https://github.com/Acnuma/osu-hybrid-rank-system" target="_blank" rel="noopener">github.com/Acnuma/osu-hybrid-rank-system</a>
+        </p>
+      </div>
+    </details>
   </header>
 
   <div class="controls">
@@ -85,15 +143,17 @@
   </div>
 
   <div class="wrap">
+    <p class="updated" id="updated">Leaderboard data last updated:
+      <span id="updated-date">—</span></p>
     <table id="board" hidden>
       <thead>
         <tr>
           <th data-key="hybrid_rank" class="left sorted">#&nbsp;<span class="arrow">▲</span></th>
           <th data-key="username" class="left">Player</th>
-          <th data-key="pp_rank">pp</th>
+          <th data-key="pp_rank">pp rank</th>
           <th data-key="badges">badges</th>
           <th data-key="bws_pp_rank">bws</th>
-          <th data-key="elo_rank">elo</th>
+          <th data-key="elo_rank">elo rank</th>
           <th data-key="hybrid_score">score</th>
         </tr>
       </thead>
@@ -103,10 +163,9 @@
   </div>
 
   <footer>
-    Data scraped from public <a href="https://osu.ppy.sh">osu!</a> profiles and
-    leaderboards. Not affiliated with or endorsed by osu! / ppy Pty Ltd.
-    Built with <a href="https://github.com/">HybridRankSystem</a> — pure standard
-    library, no tracking.
+    <p>Data scraped from public <a href="https://osu.ppy.sh">osu!</a> profiles and
+      leaderboards. Not affiliated with or endorsed by osu! / ppy Pty Ltd.
+      Pure standard library, no tracking.</p>
   </footer>
 
   <script src="app.js"></script>

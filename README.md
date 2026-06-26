@@ -98,7 +98,7 @@ branch* → branch `main`, folder `/docs`. The board goes live at
 **Refresh the published data** (manual — you control the scrape rate):
 
 ```
-python hybrid_rank.py --bws --out docs/hybrid_leaderboard.csv   # full scrape (~40 min first time)
+python hybrid_rank.py --anchor rankedplay --top 10000 --bws --out docs/hybrid_leaderboard.csv  # full scrape (~40 min first time)
 git add docs/hybrid_leaderboard.csv && git commit -m "refresh leaderboard" && git push
 ```
 
