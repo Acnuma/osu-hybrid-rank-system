@@ -219,6 +219,7 @@ ranked-play board has no such cap — it pages fully to ~98k.)
   it is brand new and still under active development.)
 - **Most players haven't queued even once,** so they never appear on the
   leaderboard at all.
+- **The board only ranks the top 10,000 Ranked Play players.** osu!'s bulk leaderboards stop at 10k, so anyone outside that pool never appears even if their calculated hybrid score would allow them to be placed on the leaderboard. Every hybrid rank is a standing *within the 10k ranked play ranking sample* rather than a true global one.
 - **Tournament badges can't be counted reliably.** A profile only exposes *how
   many* badges a player has — not whether a given badge is for a tournament, how
   old it is, or the skill level of the event. Some badges note the placement
