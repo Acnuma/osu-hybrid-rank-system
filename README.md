@@ -228,6 +228,13 @@ ranked-play board has no such cap — it pages fully to ~98k.)
   counting only badges that link to a tournament forum thread or wiki page — but
   some tournament badges link to nothing at all (e.g. **Corsace**), so they are
   missed entirely.
+- **BWS is a one-dimensional proxy for tournament skill.** Badge-weighting leans
+  on a player's badge *count* as a stand-in for tournament ability, but even with
+  perfect badge data that is a blunt signal: a count says a player won or placed
+  in some events, not who they beat, how they performed, or how strong the field
+  was. A purpose-built tournament rating such as [OTR](https://otr.stagec.net/leaderboard)
+  measures this directly and would be a better fit — it may well replace BWS in
+  this project down the line.
 - **The 0.35 weight (the BWS ↔ Elo skew) is debatable.** The board leans toward
   Elo because the PP side is already lifted by BWS, and Elo carries a recency
   bias that should, in theory, make it a better gauge of a player's *current*
