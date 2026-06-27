@@ -215,8 +215,8 @@ ranked-play board has no such cap — it pages fully to ~98k.)
 
 - **Elo is still inaccurate because too few players queue.** For Elo to be
   meaningful, players — especially those at the top — need to play ranked
-  matches relatively frequently. (This assumes the Elo system itself is sound;
-  it is brand new and still under active development.)
+  matches relatively frequently. (This assumes the Elo system itself is reliable
+  — it is brand new and still under active development.)
 - **Most players haven't queued even once,** so they never appear on the
   leaderboard at all.
 - **The board only ranks the top 10,000 Ranked Play players.** osu!'s bulk leaderboards stop at 10k, so anyone outside that pool never appears even if their calculated hybrid score would allow them to be placed on the leaderboard. Every hybrid rank is a standing *within the 10k ranked play ranking sample* rather than a true global one.
@@ -240,6 +240,18 @@ ranked-play board has no such cap — it pages fully to ~98k.)
   bias that should, in theory, make it a better gauge of a player's *current*
   skill relative to others. Even so, a different weight may be equally valid — or
   better.
+- **The board blends ranks, not normalized scores.** The hybrid score adds
+  a player's PP *rank* and Elo *rank* directly, but a rank is an ordinal position,
+  not a measured value — and two problems follow. First, the two ranks come from
+  very differently-sized pools: PP rank is a place out of millions, while Elo rank
+  is a place out of only the ~10k who queue, so the same number means very
+  different things on each axis. Second, ranks throw away magnitude — the gap
+  between #1 and #2 is enormous, while #5,000 and #5,001 are nearly identical,
+  yet every place is treated as equal. A truer approach would normalize the
+  underlying PP and Elo scores (or at least convert each rank to a percentile)
+  before blending. The current rank-blend is a deliberate trade for simplicity and
+  robustness — ranks are bounded and outlier-proof — at the cost of ignoring those
+  gaps.
 
 ### Does a hybrid leaderboard even need to exist?
 

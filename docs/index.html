@@ -208,7 +208,7 @@
             <strong>Elo is still inaccurate because too few players queue.</strong>
             For Elo to be meaningful, players — especially those at the top —
             need to play ranked matches relatively frequently. (This assumes the
-            Elo system itself is sound; it is brand new and still under active
+            Elo system itself is reliable — it is brand new and still under active
             development.)
           </li>
           <li>
@@ -251,6 +251,22 @@
             BWS, and Elo carries a recency bias that should, in theory, make it a
             better gauge of a player's <em>current</em> skill relative to others.
             Even so, a different weight may be equally valid — or better.
+          </li>
+          <li>
+            <strong>The board blends ranks, not normalized scores.</strong>
+            The hybrid score adds a player's PP <em>rank</em> and Elo
+            <em>rank</em> directly, but a rank is an ordinal position, not a
+            measured value — and two problems follow. First, the two ranks come
+            from very differently-sized pools: PP rank is a place out of
+            millions, while Elo rank is a place out of only the ~10k who queue,
+            so the same number means very different things on each axis. Second,
+            ranks throw away magnitude — the gap between #1 and #2 is
+            enormous, while #5,000 and #5,001 are nearly identical, yet every
+            place is treated as equal. A truer approach would normalize the
+            underlying PP and Elo scores (or at least convert each rank to a
+            percentile) before blending. The current rank-blend is a deliberate
+            trade for simplicity and robustness — ranks are bounded and
+            outlier-proof — at the cost of ignoring those gaps.
           </li>
         </ul>
         <p class="formula-label">Does a hybrid leaderboard even need to exist?</p>
