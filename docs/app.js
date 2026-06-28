@@ -27,6 +27,12 @@ let ROWS = [];                       // parsed objects
 let sortKey = "hybrid_score";
 let sortDir = -1;                    // 1 = ascending, -1 = descending
 
+// --- virtual-scroll state (see drawWindow) ---
+let VIEW = [];                       // current filtered + sorted rows
+let ROW_H = 37;                      // data-row height in px; measured from a real row
+const OVERSCAN = 8;                  // rows rendered just past the viewport, each side
+let drawPending = false;             // coalesces scroll/resize redraws to one per frame
+
 const $ = (sel) => document.querySelector(sel);
 
 // --- minimal CSV parse (osu usernames contain no commas, so split is safe) ---
@@ -135,8 +141,8 @@ function render() {
     if (av > bv) return 1 * dir;
     return a.hybrid_rank - b.hybrid_rank;     // stable tie-break by hybrid rank
   });
+  VIEW = view;
 
-  $("#rows").innerHTML = view.map(rowHTML).join("");
   $("#board").hidden = view.length === 0;
   $("#status").hidden = view.length !== 0 || ROWS.length === 0;
   if (view.length === 0 && ROWS.length > 0) {
@@ -154,6 +160,60 @@ function render() {
     const arrow = th.querySelector(".arrow");
     if (arrow) arrow.textContent = isSorted ? (dir === 1 ? "▲" : "▼") : "";
   });
+
+  // A fresh sort/search realigns which rows sit under the viewport; redraw the
+  // visible window. Only ~one screenful of <tr>s ever reaches the DOM.
+  drawWindow();
+}
+
+// --- virtual scrolling -------------------------------------------------------
+// The board holds up to 10k rows. Materializing all of them (each <tr> carries
+// several inner nodes) means every sort/search/scroll re-parses ~60k DOM nodes —
+// THAT is the lag, not the sort. So we keep the full sorted list in VIEW and put
+// only the rows intersecting the viewport (plus a small overscan) into the DOM,
+// padding above and below with two spacer rows so the scrollbar still spans the
+// full height. The page keeps its single continuous scroll and sticky header.
+function scheduleDraw() {
+  if (drawPending) return;
+  drawPending = true;
+  requestAnimationFrame(() => { drawPending = false; drawWindow(); });
+}
+
+function drawWindow() {
+  const board = $("#board");
+  const body = $("#rows");
+  if (!board || !body) return;
+  const n = VIEW.length;
+  // No data, or the calculator tab is showing (board has no layout box): bail.
+  if (n === 0 || board.offsetParent === null) { body.innerHTML = ""; return; }
+
+  const thead = board.tHead;
+  const tableTop = board.getBoundingClientRect().top + window.scrollY;
+  const rowsTop = tableTop + (thead ? thead.offsetHeight : 0);
+  const vh = window.innerHeight;
+  const top = window.scrollY;
+
+  // First/last row whose vertical span intersects the viewport, ± overscan.
+  let start = Math.floor((top - rowsTop) / ROW_H) - OVERSCAN;
+  let end = Math.ceil((top + vh - rowsTop) / ROW_H) + OVERSCAN;
+  start = Math.max(0, Math.min(start, n));
+  end = Math.max(start, Math.min(end, n));
+
+  // Spacers carry the off-screen height; topPad + rendered + botPad == n·ROW_H.
+  const spacer = (h) =>
+    `<tr class="spacer" aria-hidden="true"><td colspan="9" style="padding:0;border:0;height:${h}px"></td></tr>`;
+  let html = start > 0 ? spacer(start * ROW_H) : "";
+  for (let i = start; i < end; i++) html += rowHTML(VIEW[i]);
+  if (end < n) html += spacer((n - end) * ROW_H);
+  body.innerHTML = html;
+
+  // Calibrate ROW_H from a real rendered row; if it differs from the estimate,
+  // redraw once with the true height (the recheck then converges, no loop).
+  const sample = body.querySelector("tr:not(.spacer)");
+  if (sample) {
+    const h = sample.offsetHeight;
+    if (h && Math.abs(h - ROW_H) > 0.5) { ROW_H = h; scheduleDraw(); }
+  }
 }
 
 // ranks read better ascending (1 = best); pp, ratings, score and vs-Elo gain descending
@@ -327,6 +387,11 @@ async function init() {
   initCalc(meta);
   document.querySelectorAll("thead th").forEach((th) =>
     th.addEventListener("click", () => onHeaderClick(th)));
+
+  // Re-window on scroll/resize/tab-switch (passive: never blocks scrolling).
+  window.addEventListener("scroll", scheduleDraw, { passive: true });
+  window.addEventListener("resize", scheduleDraw);
+  document.getElementById("tabs").addEventListener("click", scheduleDraw);
 
   let debounce;
   $("#search").addEventListener("input", () => {
