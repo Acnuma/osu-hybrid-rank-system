@@ -67,7 +67,12 @@
   #search:focus { outline: none; border-color: var(--accent-dim); }
   .meta { color: var(--dim); font-size: 13px; white-space: nowrap; }
   .wrap { max-width: 1000px; margin: 0 auto; padding: 0 20px 60px; }
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+  /* Fixed layout pins column widths to the <colgroup> below so they DON'T depend
+     on which rows are currently in the DOM. With virtual scrolling the visible row
+     window changes constantly; under the default `auto` layout that made columns
+     re-fit (jiggle) on every scroll. Widths are sized for each column's widest
+     possible value (e.g. the "vs pp" delta can reach ▴ +89,504). */
+  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
   thead th {
     position: sticky; top: 0; background: var(--bg); z-index: 1;
     text-align: right; padding: 10px 12px; font-size: 12px; letter-spacing: .04em;
@@ -373,17 +378,28 @@
     <p class="updated" id="updated">Leaderboard data last updated:
       <span id="updated-date">—</span></p>
     <table id="board" hidden>
+      <colgroup>
+        <col style="width:84px">   <!-- #     (rank, up to 10,000) -->
+        <col>                       <!-- Player (flexes to fill remaining width) -->
+        <col style="width:100px">  <!-- vs pp  (delta up to ▴ +89,504) -->
+        <col style="width:100px">  <!-- vs elo -->
+        <col style="width:100px">  <!-- vs otr -->
+        <col style="width:88px">   <!-- pp    (up to 33,791) -->
+        <col style="width:92px">   <!-- elo   (up to 2,489 + marker) -->
+        <col style="width:92px">   <!-- otr   (up to 2,894 + marker) -->
+        <col style="width:92px">   <!-- score -->
+      </colgroup>
       <thead>
         <tr>
           <th data-key="hybrid_rank" class="left sorted">#&nbsp;<span class="arrow">▲</span></th>
-          <th data-key="username" class="left">Player</th>
-          <th data-key="pp_delta" title="Places gained or lost versus PP rank alone (PP rank − hybrid rank).">vs pp</th>
-          <th data-key="elo_delta" title="Places gained or lost versus Elo rank alone (Elo rank − hybrid rank). — = Elo is seeded (no Elo rank).">vs elo</th>
-          <th data-key="otr_delta" title="Places gained or lost versus OTR global rank (OTR rank − hybrid rank). — = OTR is seeded (no real OTR rank).">vs otr</th>
-          <th data-key="pp" title="Raw performance points (pp).">pp</th>
-          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP.">elo</th>
-          <th data-key="otr_rating" title="osu! Tournament Rating. ~ = estimated from osu! rank (no verified tournament play).">otr</th>
-          <th data-key="hybrid_score">score</th>
+          <th data-key="username" class="left">Player&nbsp;<span class="arrow"></span></th>
+          <th data-key="pp_delta" title="Places gained or lost versus PP rank alone (PP rank − hybrid rank).">vs pp&nbsp;<span class="arrow"></span></th>
+          <th data-key="elo_delta" title="Places gained or lost versus Elo rank alone (Elo rank − hybrid rank). — = Elo is seeded (no Elo rank).">vs elo&nbsp;<span class="arrow"></span></th>
+          <th data-key="otr_delta" title="Places gained or lost versus OTR global rank (OTR rank − hybrid rank). — = OTR is seeded (no real OTR rank).">vs otr&nbsp;<span class="arrow"></span></th>
+          <th data-key="pp" title="Raw performance points (pp).">pp&nbsp;<span class="arrow"></span></th>
+          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP.">elo&nbsp;<span class="arrow"></span></th>
+          <th data-key="otr_rating" title="osu! Tournament Rating. ~ = estimated from osu! rank (no verified tournament play).">otr&nbsp;<span class="arrow"></span></th>
+          <th data-key="hybrid_score">score&nbsp;<span class="arrow"></span></th>
         </tr>
       </thead>
       <tbody id="rows"></tbody>
