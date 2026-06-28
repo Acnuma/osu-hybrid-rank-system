@@ -1,6 +1,8 @@
 # HybridRankSystem
 
-### 🏆 [**View the live leaderboard →**](https://acnuma.github.io/osu-hybrid-rank-system/)
+### 🏆 [**View the leaderboard →**](https://acnuma.github.io/osu-hybrid-rank-system/)
+
+*Not real-time — the board is a periodically-refreshed snapshot (manually regenerated, data cached ~1 week). The site shows when the data was last updated.*
 
 The published board is generated with:
 
@@ -268,7 +270,7 @@ adjusted toward its PP-prior, so rather than a per-row symbol the **Elo number i
 itself a hover target** (shows the raw rating + match count). Only the categorical
 states carry a mark: **`*`** provisional (osu!'s own flag) and **`^`** no real Elo
 (the value is the PP seed). OTR estimates from rank are marked **`~`**. A second **Calculator** tab computes a hybrid score
-from a raw PP, Elo, and OTR — it pulls the live board's per-axis mean/std from the
+from a raw PP, Elo, and OTR — it pulls the published board's per-axis mean/std from the
 meta sidecar, so with the default weights it reproduces exactly what the board
 computed. The three weights are pre-filled with the board's split but **editable**,
 so you can see how a different PP/Elo/OTR balance would score a player (with a
@@ -392,3 +394,7 @@ arguments for its existence are:
    their opponent in tournaments and ranked play. But that's a meta-game layered
    on top — the core gameplay loop, clicking circles to the beat for a high
    score, plays out in isolation and is unaffected by it.
+
+---
+
+*Parts of this app were vibe-coded or edited with the help of AI.*
