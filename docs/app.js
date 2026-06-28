@@ -60,7 +60,8 @@ function parseCSV(text) {
 }
 
 function fmt(key, val) {
-  if (key === "hybrid_score") return val.toFixed(3);
+  // The score column shows 4 dp; the cell's hover title reveals the full value.
+  if (key === "hybrid_score") return val.toFixed(4);
   if (NUMERIC.has(key)) return val.toLocaleString("en-US");
   return val;
 }
@@ -77,9 +78,11 @@ function rowHTML(r) {
   const prov = r.provisional
     ? `<abbr class="prov" title="Provisional rating — too few recent ranked-play matches for a stable Elo.">*</abbr>`
     : "";
-  const est = r.otr_estimated
-    ? `<abbr class="prov" title="Estimated from osu! rank — this player has no verified tournament play, so OTR's starting prior is used.">~</abbr>`
-    : "";
+  // OTR seeded-from-rank: highlight the whole value the same way a seeded Elo is
+  // (bold accent, `~` mark, tooltip over the entire number), not just the marker.
+  const otrCell = r.otr_estimated
+    ? `<abbr class="prov" title="Estimated from osu! rank — this player has no verified tournament play, so OTR's starting prior is used.">${fmt("otr_rating", r.otr_rating)}~</abbr>`
+    : fmt("otr_rating", r.otr_rating);
   // Shrinkage applies to EVERY real Elo (continuously), so a per-row "shrunk"
   // symbol would just be threshold noise. Instead the Elo NUMBER itself is the
   // hover target: mousing over it reveals the raw rating + match count. Only the
@@ -103,8 +106,8 @@ function rowHTML(r) {
     deltaCell(r.otr_delta) +
     `<td>${fmt("pp", r.pp)}</td>` +
     `<td>${eloCell}</td>` +
-    `<td>${fmt("otr_rating", r.otr_rating)}${est}</td>` +
-    `<td class="score">${fmt("hybrid_score", r.hybrid_score)}</td>` +
+    `<td>${otrCell}</td>` +
+    `<td class="score"><abbr class="score-num" title="Exact score: ${r.hybrid_score}">${fmt("hybrid_score", r.hybrid_score)}</abbr></td>` +
     `</tr>`
   );
 }
