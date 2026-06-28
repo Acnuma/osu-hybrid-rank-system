@@ -1137,7 +1137,7 @@ def write_csv(rows: list[Row], path: str, norm: dict,
                         "" if r.otr_rank is None else r.otr_rank,
                         f"{r.otr_rating:.0f}", "yes" if r.otr_estimated else "",
                         r.tournaments_played, r.plays,
-                        "yes" if r.provisional else "", f"{r.hybrid_score:.4f}"])
+                        "yes" if r.provisional else "", repr(r.hybrid_score)])
     _write_meta(path, rows, norm, filt, extra)
     return path
 
