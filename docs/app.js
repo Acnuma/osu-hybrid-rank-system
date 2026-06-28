@@ -80,9 +80,11 @@ function rowHTML(r) {
     : "";
   // OTR seeded-from-rank: highlight the whole value the same way a seeded Elo is
   // (bold accent, `~` mark, tooltip over the entire number), not just the marker.
+  // Real OTR ratings link to the player's OTR profile; seeded estimates do not
+  // (those players aren't in OTR's database, so the profile would 404).
   const otrCell = r.otr_estimated
-    ? `<abbr class="prov" title="Estimated from osu! rank — this player has no verified tournament play, so OTR's starting prior is used.">${fmt("otr_rating", r.otr_rating)}~</abbr>`
-    : fmt("otr_rating", r.otr_rating);
+    ? `<abbr class="prov" title="Estimated from osu! rank — no verified tournament play, so OTR's starting prior is used.">${fmt("otr_rating", r.otr_rating)}~</abbr>`
+    : `<a class="user" href="https://otr.stagec.net/players/${r.user_id}" target="_blank" rel="noopener" title="View tournament profile on otr.stagec.net">${fmt("otr_rating", r.otr_rating)}</a>`;
   // Shrinkage applies to EVERY real Elo (continuously), so a per-row "shrunk"
   // symbol would just be threshold noise. Instead the Elo NUMBER itself is the
   // hover target: mousing over it reveals the raw rating + match count. Only the
@@ -90,11 +92,11 @@ function rowHTML(r) {
   // "not yet stable" flag) and `^` seeded (no real Elo at all; a PP estimate).
   let eloCell;
   if (r.elo_estimated) {
-    eloCell = `<abbr class="prov" title="Estimated from PP — this player has never queued ranked play, so an Elo is inferred from their pp (the w=0 limit of the shrinkage below).">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
+    eloCell = `<abbr class="prov" title="Estimated from PP — never queued ranked play, so Elo is inferred from pp.">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
   } else {
     const rawTxt = Number.isNaN(r.elo_raw) ? "?" : r.elo_raw.toLocaleString("en-US");
     const matches = `${r.plays} ranked ${r.plays === 1 ? "match" : "matches"}`;
-    const title = `Ranked Play Elo. The shown value is sample-size adjusted toward its PP-expected value (weight n/(n+5)); raw Elo ${rawTxt} over ${matches}.`;
+    const title = `Ranked Play Elo, sample-size adjusted toward its PP estimate. Raw Elo ${rawTxt} over ${matches}.`;
     eloCell = `<abbr class="elo-num" title="${title}">${fmt("elo_rating", r.elo_rating)}</abbr>${r.provisional ? prov : ""}`;
   }
   return (
