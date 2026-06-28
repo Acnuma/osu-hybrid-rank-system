@@ -96,6 +96,9 @@
     color: var(--accent); font-weight: 700; cursor: help;
     margin-left: 2px; text-decoration: none; border: 0;
   }
+  /* The Elo number is itself a hover target (raw rating + match count). No static
+     mark — just a help cursor — so the column stays uncluttered. */
+  .elo-num { cursor: help; color: inherit; text-decoration: none; border: 0; }
   .score { font-weight: 600; }
   td.delta { font-weight: 600; }
   td.delta.up { color: #57d977; }
@@ -156,7 +159,23 @@
   }
   .calc-stat-val.accent { color: var(--accent); }
   .calc-err { color: #ff6b6b; font-size: 13px; margin: 0; }
-  @media (max-width: 480px) { .calc-grid { grid-template-columns: 1fr; } }
+  .calc-weights { margin: 0 0 18px; }
+  .calc-weights-head {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; flex-wrap: wrap; margin: 0 0 8px;
+  }
+  .calc-weights-head > span { font-size: 13px; color: var(--dim); font-weight: 600; }
+  .w-reset {
+    appearance: none; background: none; border: 0; cursor: pointer; padding: 0;
+    color: var(--accent); font: inherit; font-size: 12px; font-weight: 600;
+  }
+  .w-reset:hover { text-decoration: underline; }
+  .calc-weights .calc-grid { grid-template-columns: repeat(3, 1fr); margin: 0 0 6px; }
+  .calc-wsum { font-size: 12px; color: var(--dim); margin: 0; }
+  .calc-wsum.warn { color: #e0b341; }
+  @media (max-width: 480px) {
+    .calc-grid, .calc-weights .calc-grid { grid-template-columns: 1fr; }
+  }
 </style>
 </head>
 <body data-view="leaderboard">
@@ -167,40 +186,83 @@
       <button class="tab" data-view="calculator">Calculator</button>
     </nav>
     <p class="sub lb-only">
-      This leaderboard attempts to <strong>score</strong> (lower is better) the
-      top 10k Ranked Play players based on their <strong>PP rank</strong>,
-      <strong>Elo rank</strong> (Ranked Play rank), and participation in
-      tournaments using <strong><a href="https://osu.ppy.sh/wiki/en/Tournaments/Badge-weighted_seeding" target="_blank" rel="noopener">BWS</a></strong>, with a skew towards Elo. Players
-      without an Elo rank or without a PP rank do not show up on this leaderboard.
-      Moreover, players with <strong>fewer than 5 ranked plays</strong> or a
-      <strong>calculated score above 10,000</strong> are also excluded due to their stats
-      being highly inaccurate.
+      This leaderboard <strong>scores</strong> (higher is better) the players in the
+      <strong>union of the PP top-10k, the Ranked Play top-10k, and the OTR top-10k</strong> — then
+      shows the best 10,000 — by blending three signals on one common,
+      normalized scale: their <strong>PP</strong>
+      their <strong>Elo rating</strong> (Ranked Play), and their
+      <strong><a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a></strong>
+      (osu! Tournament Rating), with a slight skew toward the two competitive
+      axes. A player must carry at least one <em>real</em> competitive rating (a
+      real Elo or a real OTR) to appear. Low-play Elos aren't thrown away — they're
+      <strong>statistically shrunk</strong> toward the rating their PP predicts, so
+      a handful of noisy matches can't inflate a player's standing.
     </p>
     <details class="more lb-only">
       <summary>Show more</summary>
       <div class="more-body">
         <p class="formula-label">Formula used for this leaderboard:</p>
         <div class="formula">
-          <code>score = 0.35 × ( pp_rank ^ ( 0.9937 ^ ( badges ^ 2 ) ) ) + 0.65 × elo_rank</code>
+          <code>score = 0.30 × z(log pp) + 0.35 × z(elo) + 0.35 × z(otr)</code>
         </div>
         <p class="sub">
-          The <strong>0.35 / 0.65</strong> split makes the result lean toward 
-          <strong>Elo Rank</strong>, while a strong <strong>PP&nbsp;rank</strong>
-          still lifts a player. On top of that, <strong>badge-weighted seeding (BWS)</strong>
-          rewards tournament players by pulling their <strong>PP&nbsp;rank toward #1</strong>
-          — only the PP side is adjusted; Elo is left untouched. The more tournament
-          badges a player has, the bigger the lift, so a decorated player isn't
-          dragged down by a deep PP rank. Only badges that link to a
-          <strong>tournament forum thread</strong> or a <strong>wiki Tournaments
-          page</strong> are counted. The <strong>BWS</strong> column is that
-          badge-adjusted PP rank that actually feeds the score. The
-          <strong>vs PP</strong> column shows how many places a player gained
-          (green ▴) or lost (red ▾) compared with their PP rank alone. An
+          Each of the three axes is <strong>standardized</strong> across the
+          board: <code>z(x) = (x − mean) / std</code>, measured over everyone on
+          the board (PP is logged first because it is heavily skewed). That puts
+          all three on the same <em>standard-deviations-from-average</em> scale,
+          so a place gained on one axis is worth the same as on another — and the
+          blend tracks <em>magnitude</em>, not just ordinal rank. The
+          <strong>0.30 / 0.35 / 0.35</strong> split leans toward the competitive
+          axes (Elo + OTR) while still rewarding raw <strong>PP</strong>.
+          <strong>OTR</strong> is a real tournament rating; players with no
+          tournament history instead get an <strong>estimate</strong> seeded from
+          their osu! rank (OTR's own starting formula), marked with a
+          <strong>tilde (<span style="color:var(--accent)">~</span>)</strong>. The
+          three <strong>vs</strong> columns (<strong>vs pp</strong>,
+          <strong>vs elo</strong>, <strong>vs otr</strong>) show how many places a
+          player gained (green ▴) or lost (red ▾) versus that one axis's rank alone
+          (— when that axis is seeded, so there's no real rank to compare against).
+          An
           <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>
-          next to a player's <strong>Elo rank</strong> marks a
-          <strong>provisional</strong> rating — osu! considers it not yet stable
-          because the player has too few recent Ranked Play matches. Click any
-          column header to sort.
+          next to a player's <strong>Elo</strong> marks a <strong>provisional</strong>
+          rating — osu! considers it not yet stable because the player has too few
+          recent Ranked Play matches. Click any column header to sort.
+        </p>
+        <p class="formula-label">How low-play Elos are handled (shrinkage)</p>
+        <p class="sub">
+          A ranked-play Elo built on a handful of matches is noisy. Rather than
+          trust it blindly <em>or</em> throw the player out, each Elo is
+          <strong>shrunk toward the rating their PP predicts</strong>, weighted by
+          how many matches back it:
+          <code>elo = prior + (raw_elo − prior) × n / (n + 5)</code>, where
+          <code>prior</code> is a PP→Elo fit (built only from stable, ≥10-match
+          players) and <code>n</code> is the match count. With one match the Elo is
+          pulled most of the way to its PP-expected value; by ~25 matches it is
+          almost entirely the player's own. Because <em>every</em> Elo is adjusted
+          this way, there's no per-row symbol for it — instead <strong>hover any Elo
+          number</strong> to see its raw rating and match count. A
+          provisional rating (osu! considers it unstable — too few recent matches)
+          still carries an <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>.
+          A player with
+          <em>no</em> Elo at all is just the
+          <code>n = 0</code> limit of the same formula (their Elo equals the prior),
+          marked with a <strong>caret (<span style="color:var(--accent)">^</span>)</strong>.
+          The same shrunk value is what feeds the score, so the
+          <strong>Elo</strong> column shows the adjusted rating, not the raw one.
+        </p>
+        <p class="sub">
+          <strong>Why the number 5?</strong> It is not arbitrary. Using
+          <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a>
+          as an independent yardstick for competitive skill, a player's Elo only
+          becomes a <em>better</em> skill predictor than their PP once they have
+          about <strong>five ranked matches</strong>. Below five, a real Elo tracks
+          OTR no better than a pure PP guess does (correlation <code>0.56</code> vs
+          <code>0.56</code> — a statistical dead heat, Williams test
+          <code>p = 0.84</code>); at five or more it pulls clearly ahead
+          (<code>0.70</code>, Fisher <code>z = 8.3</code>,
+          <code>p &lt; 10⁻¹⁵</code>). Five is therefore where a match's worth of
+          evidence equals the PP prior's — exactly the right half-weight point for
+          the shrinkage above.
         </p>
         <p class="formula-label">Biggest limitations</p>
         <ul class="limitations">
@@ -209,64 +271,60 @@
             For Elo to be meaningful, players — especially those at the top —
             need to play ranked matches relatively frequently. (This assumes the
             Elo system itself is reliable — it is brand new and still under active
-            development.)
+            development.) The low-play shrinkage above softens this, but it cannot
+            manufacture data that isn't there.
           </li>
           <li>
-            <strong>Most players haven't queued even once,</strong> so they never
-            appear on this leaderboard at all.
+            <strong>Shrinkage leans on an imperfect PP→Elo prior.</strong> Pulling a
+            noisy Elo toward its PP-expected value assumes PP is a decent guess of
+            competitive skill — but that fit is loose (it explains only about a
+            third of the variance in Elo). So a genuine over-performer — someone far
+            better in matches than their PP suggests — who has played very few
+            matches will be tugged unfairly toward the crowd until they rack up
+            games. Shrinkage trades a little of that edge-case fairness for a lot
+            less small-sample noise.
           </li>
           <li>
-            <strong>The board only ranks the top 10,000 Ranked Play players.</strong>
-            osu!'s bulk leaderboards stop at 10k, so anyone outside that pool never
-            appears even if their calculated hybrid score would allow them to be placed
-            on the leaderboard. Every hybrid rank is a standing <em>within the 10k ranked
-            play ranking sample</em> rather than a true global one.
+            <strong>The pools it draws from stop at 10,000.</strong> The board is the
+            union of the PP top-10k, the Ranked Play top-10k, and the OTR top-10k —
+            each leaderboard stops at 10k — so a player ranked outside <em>all three</em>
+            pools never appears, even if their hybrid score would place them. Every
+            hybrid rank is a standing <em>within this union sample</em> rather than a
+            true global one. Adding the OTR pool now surfaces tournament-only players
+            who don't grind PP or queue ranked play.
           </li>
           <li>
-            <strong>Tournament badges can't be counted reliably.</strong> A
-            profile only exposes <em>how many</em> badges a player has — not
-            whether a given badge is for a tournament, how old it is, or the
-            skill level of the event. Some badges note the placement achieved,
-            many don't, and the tooltip wording on a badge is inconsistent and 
-            often in different languages, so the data can't be trusted. This
-            leaderboard approximates it by counting only badges that link to a
-            tournament forum thread or wiki page — but some tournament badges
-            link to nothing at all (e.g. <strong>Corsace</strong>), so they are
-            missed entirely.
-          </li>
-          <li>
-            <strong>BWS is a one-dimensional proxy for tournament skill.</strong>
-            Badge-weighting leans on a player's badge <em>count</em> as a
-            stand-in for tournament ability, but even with perfect badge data
-            that is a blunt signal: a count says a player won or placed in some
-            events, not who they beat, how they performed, or how strong the
-            field was. A purpose-built tournament rating such as
+            <strong>About a third of this board's OTR ratings are estimates, not real ones.</strong>
             <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a>
-            measures this directly and would be a better fit — it may well
-            replace BWS in this project down the line.
+            only rates players who have competed in verified tournaments — about
+            two-thirds of the board. Everyone else gets a rating <em>seeded from their
+            osu! rank</em> (marked <span style="color:var(--accent)">~</span>),
+            which is just OTR's starting prior, not evidence of actual tournament
+            results. For those players the OTR axis adds little beyond what PP
+            already says.
           </li>
           <li>
-            <strong>The 0.35 weight (the BWS ↔ Elo skew) is debatable.</strong>
-            The board leans toward Elo because the PP side is already lifted by
-            BWS, and Elo carries a recency bias that should, in theory, make it a
-            better gauge of a player's <em>current</em> skill relative to others.
-            Even so, a different weight may be equally valid — or better.
+            <strong>OTR itself is a moving, partial target.</strong> It updates
+            on a weekly cadence and decays after about six months of tournament
+            inactivity, so a player's tournament axis can lag their current form.
+            It also only counts <em>approved</em> matches — qualifiers, scrims and
+            unverified events don't register.
           </li>
           <li>
-            <strong>The board blends ranks, not normalized scores.</strong>
-            The hybrid score adds a player's PP <em>rank</em> and Elo
-            <em>rank</em> directly, but a rank is an ordinal position, not a
-            measured value — and two problems follow. First, the two ranks come
-            from very differently-sized pools: PP rank is a place out of
-            millions, while Elo rank is a place out of only the ~10k who queue,
-            so the same number means very different things on each axis. Second,
-            ranks throw away magnitude — the gap between #1 and #2 is
-            enormous, while #5,000 and #5,001 are nearly identical, yet every
-            place is treated as equal. A truer approach would normalize the
-            underlying PP and Elo scores (or at least convert each rank to a
-            percentile) before blending. The current rank-blend is a deliberate
-            trade for simplicity and robustness — ranks are bounded and
-            outlier-proof — at the cost of ignoring those gaps.
+            <strong>The three-way weight split is debatable.</strong> The board
+            uses <strong>0.30 PP / 0.35 Elo / 0.35 OTR</strong>, leaning toward
+            the competitive axes. That balance is a judgement call — a different
+            split may be equally valid, or better — and because about a third of
+            OTR is estimated today, its real influence is somewhat smaller than
+            its weight suggests.
+          </li>
+          <li>
+            <strong>Normalization is relative to whoever is on the board.</strong>
+            Each axis is standardized against this population, so a player's score
+            shifts a little whenever the board's makeup changes. That is the
+            trade for measuring magnitude on a common scale rather than blending
+            raw, incomparable numbers — but it means scores are standings within
+            <em>this</em> sample, not absolute values.
           </li>
         </ul>
         <p class="formula-label">Does a hybrid leaderboard even need to exist?</p>
@@ -299,7 +357,7 @@
           </li>
         </ol>
         <p class="sub">
-          Full source code, the exact badge rules and the scraper:
+          Full source code, the exact scoring rules and the scraper:
           <a href="https://github.com/Acnuma/osu-hybrid-rank-system" target="_blank" rel="noopener">github.com/Acnuma/osu-hybrid-rank-system</a>
         </p>
       </div>
@@ -319,11 +377,12 @@
         <tr>
           <th data-key="hybrid_rank" class="left sorted">#&nbsp;<span class="arrow">▲</span></th>
           <th data-key="username" class="left">Player</th>
-          <th data-key="pp_rank">pp rank</th>
-          <th data-key="pp_delta" title="Places gained or lost versus PP rank alone (PP rank − hybrid rank). Green ▴ = ranks higher here than on PP.">vs pp</th>
-          <th data-key="badges">badges</th>
-          <th data-key="bws_pp_rank">bws</th>
-          <th data-key="elo_rank">elo rank</th>
+          <th data-key="pp_delta" title="Places gained or lost versus PP rank alone (PP rank − hybrid rank).">vs pp</th>
+          <th data-key="elo_delta" title="Places gained or lost versus Elo rank alone (Elo rank − hybrid rank). Green ▴ = ranks higher here than on Elo. — = Elo is seeded (no Elo rank).">vs elo</th>
+          <th data-key="otr_delta" title="Places gained or lost versus OTR global rank (OTR rank − hybrid rank). — = OTR is seeded (no real OTR rank).">vs otr</th>
+          <th data-key="pp" title="Raw performance points (pp).">pp</th>
+          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP.">elo</th>
+          <th data-key="otr_rating" title="osu! Tournament Rating. ~ = estimated from osu! rank (no verified tournament play).">otr</th>
           <th data-key="hybrid_score">score</th>
         </tr>
       </thead>
@@ -334,39 +393,62 @@
 
   <section class="wrap calc-only">
     <p class="sub calc-intro">
-      Compute a player's <strong>hybrid score</strong> — lower is better. <strong>Badge-weighted seeding (BWS)</strong>
-      pulls the PP rank toward #1, the <strong>BWS base</strong> sets how hard each
-      badge pulls (lower = stronger; the board uses <strong>0.9937</strong>), and the
-      <strong>weight</strong> sets the PP&nbsp;↔&nbsp;Elo balance (the board uses
-      <strong>0.35</strong>).
+      Compute a player's <strong>hybrid score</strong> — higher is better. Enter a
+      player's three raw values; each is <strong>standardized</strong> against the
+      live board (its mean and standard deviation come from the latest data) and
+      blended with the weights below — pre-filled with the board's
+      (<strong id="c-w-label">0.30 PP / 0.35 Elo / 0.35 OTR</strong>), but adjust
+      them to see how a different split would rank players. PP is logged
+      before standardizing.
     </p>
     <div class="calc">
       <div class="calc-grid">
         <label class="calc-field">
-          <span>PP rank</span>
-          <input id="c-pp" type="number" min="1" step="1" value="1000" inputmode="numeric">
+          <span>PP (performance)</span>
+          <input id="c-pp" type="number" min="1" step="1" value="10000" inputmode="numeric">
         </label>
         <label class="calc-field">
-          <span>Elo rank (Ranked Play)</span>
-          <input id="c-elo" type="number" min="1" step="1" value="1000" inputmode="numeric">
+          <span>Elo rating (Ranked Play)</span>
+          <input id="c-elo" type="number" min="1" step="1" value="1500" inputmode="numeric">
         </label>
         <label class="calc-field">
-          <span>Tournament badges</span>
-          <input id="c-badges" type="number" min="0" step="1" value="0" inputmode="numeric">
+          <span>OTR rating</span>
+          <input id="c-otr" type="number" min="1" step="1" value="1500" inputmode="numeric">
         </label>
-        <label class="calc-field">
-          <span>BWS base (badge strength)</span>
-          <input id="c-bwsbase" type="number" min="0" max="1" step="0.0001" value="0.9937" inputmode="decimal">
-        </label>
-        <label class="calc-field">
-          <span>Weight (PP share, 0–1)</span>
-          <input id="c-weight" type="number" min="0" max="1" step="0.01" value="0.35" inputmode="decimal">
-        </label>
+      </div>
+      <div class="calc-weights">
+        <div class="calc-weights-head">
+          <span>Weights</span>
+          <button type="button" class="w-reset" id="c-w-reset">Reset to board weights</button>
+        </div>
+        <div class="calc-grid">
+          <label class="calc-field">
+            <span>W · PP</span>
+            <input id="c-wpp" type="number" min="0" max="1" step="0.05" value="0.30" inputmode="decimal">
+          </label>
+          <label class="calc-field">
+            <span>W · Elo</span>
+            <input id="c-welo" type="number" min="0" max="1" step="0.05" value="0.35" inputmode="decimal">
+          </label>
+          <label class="calc-field">
+            <span>W · OTR</span>
+            <input id="c-wotr" type="number" min="0" max="1" step="0.05" value="0.35" inputmode="decimal">
+          </label>
+        </div>
+        <p class="calc-wsum" id="c-wsum"></p>
       </div>
       <div class="calc-out">
         <div class="calc-stat">
-          <span class="calc-stat-label">BWS PP rank</span>
-          <span class="calc-stat-val" id="c-bws">—</span>
+          <span class="calc-stat-label">z(pp)</span>
+          <span class="calc-stat-val" id="c-zpp">—</span>
+        </div>
+        <div class="calc-stat">
+          <span class="calc-stat-label">z(elo)</span>
+          <span class="calc-stat-val" id="c-zelo">—</span>
+        </div>
+        <div class="calc-stat">
+          <span class="calc-stat-label">z(otr)</span>
+          <span class="calc-stat-val" id="c-zotr">—</span>
         </div>
         <div class="calc-stat">
           <span class="calc-stat-label">Hybrid score</span>
@@ -381,11 +463,12 @@
   </section>
 
   <footer>
-    <p>Data scraped from public <a href="https://osu.ppy.sh">osu!</a> profiles and
-      leaderboards. Not affiliated with or endorsed by osu! / ppy Pty Ltd.
+    <p>Data from public <a href="https://osu.ppy.sh">osu!</a> profiles, leaderboards
+      and the osu! / <a href="https://otr.stagec.net">OTR</a> APIs.
+      Not affiliated with or endorsed by osu! / ppy Pty Ltd.
       Pure standard library, no tracking.</p>
   </footer>
 
-  <script src="app.js?v=3"></script>
+  <script src="app.js?v=13"></script>
 </body>
 </html>

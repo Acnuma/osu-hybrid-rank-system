@@ -5,162 +5,274 @@
 The published board is generated with:
 
 ```
-python hybrid_rank.py --anchor rankedplay --top 10000 --bws --min-plays 5 --max-score 10000 --out docs/hybrid_leaderboard.csv
+python hybrid_rank.py --anchor union --otr <key> --osu-api --out docs/hybrid_leaderboard.csv
 ```
 
-- `--anchor rankedplay` — player set = the top ranked-play (matchmaking) players
-- `--top 10000` — top 10,000 of them
-- `--bws` — badge-weighted seeding (tournament players credited); optionally takes a base, e.g. `--bws 0.99`, to tune badge strength (default `0.9937`)
-- `--min-plays 5` — drop players with fewer than 5 ranked-play matches (noisy Elo)
-- `--max-score 10000` — trim the low-confidence tail (drop rows scoring above 10,000)
-- weight `W_PP = 0.35` (default) → `score = 0.35 × bws_pp + 0.65 × elo_rank`
+- `--anchor union` — player set = (**PP top-10k**) ∪ (**Ranked Play top-10k**) ∪ (**OTR top-10k**), the most complete pool (default)
+- `--otr <key>` — fetch real **OTR** tournament ratings from the otr.stagec.net API (key required; see below)
+- `--osu-api` — use the osu! API v2 for fast **batched** pp lookups of players outside the PP top-10k (50/request, vs. one HTML scrape each); reads `OSU_CLIENT_ID`/`OSU_CLIENT_SECRET` from the env (see below)
+- weights `W_PP = 0.30`, `W_ELO = 0.35`, `W_OTR = 0.35` (defaults) → `score = 0.30·z(log pp) + 0.35·z(elo) + 0.35·z(otr)`
 - mode: `osu` standard
 
-A player is skipped if they lack **either** an Elo (ranked-play) rank **or** a PP
-rank — both are required to compute the blended score. On top of that the two
-filters above remove low-match accounts and the high-score tail, so the live
-board currently shows **~4,040 players** (of the 10,000 anchored). Provisional
-ratings are **kept** and marked with an asterisk, not dropped. Drop the two
-filters (or tune them) to generate a larger board.
+A player appears if they carry at least one **real competitive rating** — a real
+Elo (they've queued ranked play) **or** a real OTR (they've played a verified
+tournament). Pure-PP accounts with neither are dropped (they'd collapse the blend
+to raw PP). The union is ~20k players; the board scores all of them and shows the
+**best 10,000**. There is **no hard min-plays cutoff**: low-play Elos are
+*statistically shrunk* toward their PP-predicted value instead of discarded (see
+[Low-play Elo shrinkage](#low-play-elo-shrinkage)). Provisional ratings are
+**kept** and marked, not dropped.
 
 ---
 
 ## Introduction
 
-Builds an osu! **hybrid global leaderboard** that blends two already-normalized
-rankings:
+Builds an osu! **hybrid global leaderboard** that blends three skill signals on a
+single, **normalized** scale — so it measures *magnitude*, not just ordinal place:
 
 | Component | Source | Notes |
 |---|---|---|
-| **PP global rank** | `osu.ppy.sh/rankings/{mode}/global` (bulk) or profile JSON | 50/page; bulk board capped at top 10k |
-| **Ranked-play rank** | `osu.ppy.sh/rankings/ranked-play/{mode}/{pool}` | osu!'s matchmaking system; pool id + last page auto-detected |
+| **PP performance** | osu! API v2 `rankings`/`users` with `--osu-api`, else `osu.ppy.sh/rankings/{mode}/global` (bulk) or profile HTML | raw pp value; bulk board capped at top 10k |
+| **Elo rating** | `osu.ppy.sh/rankings/ranked-play/{mode}/{pool}` | osu!'s matchmaking rating (mu); pool id + last page auto-detected |
+| **OTR rating** | [otr.stagec.net](https://otr.stagec.net) public API | osu! Tournament Rating; rank-seeded estimate when a player has no tournament history |
 
 ### Formula
 
+Each axis is **standardized** across the board population (z-score), then blended:
+
 ```
-hybrid_score = W_PP * pp_rank + (1 - W_PP) * elo_rank   # lower = better
-                                                        # W_PP = 0.35
+z(x)         = (x - mean) / std        # mean/std measured over the whole board
+hybrid_score = W_PP·z(log pp) + W_ELO·z(elo) + W_OTR·z(otr)   # higher = better
+               W_PP = 0.30, W_ELO = 0.35, W_OTR = 0.35
 ```
 
-`elo_rank` is osu!'s ranked-play (matchmaking) rank. Sorted ascending by
-`hybrid_score`. Ties break deterministically by elo rank, then pp rank, then
-user_id.
+PP is **logged** before standardizing because it is heavily right-skewed. Sorted
+**descending** by `hybrid_score`. Ties break deterministically by elo rating,
+then pp, then user_id. The per-axis `mean`/`std` are recorded in the `.meta.json`
+sidecar so the website calculator can reproduce any score exactly.
 
 ### Anchor modes
 
 The **anchor** decides which board defines the player set:
 
-- **`--anchor rankedplay` (default)** — take the top-N **ranked-play** players,
-  then look up each one's pp rank. PP rank comes from the bulk PP board when the
-  player is in the PP top-10k, otherwise from a **per-profile** fetch of
-  `statistics.global_rank` (no OAuth; only the extracted number is cached, not
-  the page). This is the only way to rank players past PP #10,000, and it never
-  skips a ranked-play player who simply has a deep pp rank. Players with **no pp
-  global rank** are skipped.
+- **`--anchor union` (default)** — the player set is (**PP top-10k**) ∪
+  (**Ranked Play top-10k**) ∪ (**OTR top-10k**), the most complete board: each of
+  the three skill axes contributes its own elite pool, so a player strong on *any*
+  one of them is surfaced (the OTR pool adds tournament players who don't grind PP
+  or queue ranked play). A player is kept if they carry at least one *real*
+  competitive rating (a real Elo **or** a real OTR); pure-PP accounts with neither
+  are dropped. Every kept player then gets all three axes: PP from the bulk board
+  or a per-player lookup (fast via `--osu-api`, else a per-profile HTML fetch), Elo
+  **shrunk** toward its PP-prior (or seeded from PP when absent — see below), and
+  OTR (real or rank-seeded). The full union (~20k) is scored, then the best
+  **10,000** are shown (override with `--top-k`). `--top` is ignored in this mode.
+- **`--anchor rankedplay`** — take the top-N **ranked-play** players, then look up
+  each one's pp value (bulk PP board, else a **per-profile** fetch of
+  `statistics.global_rank` + `statistics.pp`). Players with **no pp value** are
+  skipped. No shrinkage/seeding; obeys `--min-plays`.
 - **`--anchor pp`** — take the top-N **PP** players (hard-capped at 10k, see
-  below), blend in ranked-play rank from the bulk ranked-play board. Players
-  with **no ranked-play rank** are skipped.
+  below), blend in elo rating from the bulk ranked-play board. Players with **no
+  elo rating** are skipped. No shrinkage/seeding; obeys `--min-plays`.
 
-### Badge-weighted seeding (`--bws`)
+The `rankedplay`/`pp` anchors are simpler, single-pool boards retained for
+comparison; the **union** anchor is what the published site uses.
 
-Optional, opt-in. Accounts for **tournament players** by badge-weighting the pp
-axis with osu!'s [BWS formula](https://osu.ppy.sh/wiki/en/Tournaments/Badge-weighted_seeding):
+### OTR tournament rating (`--otr`)
+
+The third axis is **OTR** (osu! Tournament Rating), an OpenSkill / Plackett-Luce
+rating built from verified tournament results — a real measure of tournament
+performance, replacing the old badge-count heuristic.
 
 ```
-bws_pp = pp_rank ^ (BASE ^ tournament_badges²)          # 0 badges -> pp_rank unchanged
-hybrid_score = W_PP * bws_pp + (1 - W_PP) * elo_rank    # W_PP = 0.35
+--otr <key>     # fetch real OTR ratings (API key required)
+--otr           # bare form: read the key from the OTR_API_KEY environment variable
+(omitted)       # no API call — every OTR rating is seeded from osu! rank
 ```
 
-`--bws` takes an **optional base** (`BASE`, default `0.9937`): a bare `--bws`
-uses the standard base, while `--bws 0.99` overrides it. The base sets how hard
-each badge pulls the pp rank toward #1 — **lower = stronger** (`1.0` cancels the
-effect entirely; the value must be in `(0, 1]`). The chosen base is recorded in
-the `.meta.json` sidecar. The same knob is exposed on the website's calculator
-tab ("BWS base").
+**Getting a key:** sign in at [otr.stagec.net](https://otr.stagec.net) with your
+osu! account and create an API key (up to 3). Pass it as `--otr <key>` or export
+it as `OTR_API_KEY` and use a bare `--otr`. **The key is sent only as a Bearer
+header and is never written to disk or the CSV — keep it out of git.**
 
-More tournament badges pull a player's effective pp rank toward #1, so a
-decorated player with a deep pp rank seeds much higher (e.g. rank 10,000 with 10
-badges → effective ~135). Badge count is read from each profile's `user.badges`
-and filtered to **tournament badges** by a heuristic: the badge must link to a
-tournament wiki page or forum thread, and is excluded if its description names a
-non-tournament award (mapping/contest) or a non-playing role
-(staff/spectator/commentator). A few older badges carry no URL and are missed.
-The heuristic lives in `_is_tournament_badge` / `_NON_TOURNEY_KEYWORDS` — tune
-there. BWS mode adds `badges` and `bws_pp_rank` columns to the CSV.
+Real ratings come from a single paginated sweep of the public **OTR leaderboard**
+(`GET /api/leaderboard`, ~267 pages / ~27k players), joined to our players by osu!
+id — a fixed cost regardless of board size. The sweep is cached for 1 week; the OTR
+API shares one rate limit across endpoints, so it is paced and self-heals on 429.
 
-Cost: BWS needs a profile fetch for **every** anchored player (badges aren't on
-any bulk board), so a top-10k `--bws` run fetches ~10k profiles (vs ~5.7k for
-plain rankedplay mode). Only `--anchor rankedplay` supports it. Profiles cache
-as `{pp, badges}` JSON under `.cache/profile/`.
+**Coverage & the rank-seeded fallback.** OTR only rates players who have competed
+in verified tournaments — about **two-thirds** of this board (the rest of osu! has
+none). Everyone else gets an OTR rating **seeded from their osu! rank** using OTR's
+own initial-rating formula (`otr-processor`'s `mu_from_rank`, osu! ruleset):
+
+```
+z  = (ln(rank) - 9.99) / 1.77
+mu = 1200 - (z>0 ? 250 : 200)·z          # clamped to [500, 2000]
+```
+
+This is the rating OTR would assign *before any tournament play*. Seeded players
+are marked `otr_estimated=yes` in the CSV and with a `~` on the website, and
+their `tournaments_played` is 0. Note: a seeded OTR is a deterministic function
+of rank, so for those players the OTR axis adds little beyond PP. Real entries
+also carry the player's OTR **global rank** (`otr_rank`), used for the site's
+`vs otr` column. The whole sweep caches under `.cache/otr/` for 1 week.
+
+### Fast pp lookups via the osu! API (`--osu-api`)
+
+`--osu-api` routes the two pp data needs through the official osu! API v2 instead
+of HTML scraping:
+
+1. **The bulk PP top-10k board** — `GET /api/v2/rankings/{mode}/performance`
+   (structured JSON, no brittle HTML parsing). Same top-10k cap and 50/page; cached
+   as one file under `.cache/pp_api/`.
+2. **pp for the ~10k players outside that board** (rp/OTR recruits) — the **batch**
+   endpoint `GET /api/v2/users?ids[]=…`, up to **50 players per request** with
+   `statistics_rulesets` (`global_rank` + `pp`) — turning ~10k profile scrapes into
+   ~200 calls. Note: the osu! API throttle is **1,200 cost-units/min** and `/users`
+   charges **one unit per id** (a 50-id call costs 50), so these calls are paced to
+   ~2.7 s apart (`OSU_USERS_MIN_INTERVAL`) to stay under budget — ~10 min for the
+   full ~10k, still far better than hours of HTML scraping.
+
+```
+--osu-api       # PP board + pp lookups via the osu! API; needs OSU_CLIENT_ID + OSU_CLIENT_SECRET
+(omitted)       # falls back to HTML scraping (bulk pp pages + one profile per recruit; slow, no key)
+```
+
+(The ranked-play **Elo** board has no API equivalent — its matchmaking rating isn't
+exposed anywhere in the osu! API — so it is always HTML-scraped.)
+
+**Getting credentials:** at [osu.ppy.sh/home/account/edit](https://osu.ppy.sh/home/account/edit)
+→ **OAuth** → *New OAuth Application* (callback URL can be blank). Export the pair:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OSU_CLIENT_ID','<id>','User')
+[Environment]::SetEnvironmentVariable('OSU_CLIENT_SECRET','<secret>','User')
+```
+
+A `client_credentials` ("guest") token with `scope=public` is fetched at runtime.
+**The secret is read from the environment only — never written to disk, the CSV,
+or git, and never logged (only its length is printed).** Cached pp values are
+shared with the HTML path, so the two are interchangeable.
+
+### Low-play Elo shrinkage
+
+A ranked-play Elo built on a handful of matches is noisy. The **union** anchor does
+not discard those players (a hard min-plays cutoff throws away real signal) nor
+trust them blindly. Instead it **shrinks** every Elo toward the rating its PP
+predicts, weighted by how many matches back it:
+
+```
+prior = a + b·ln(pp)            # PP→Elo fit on STABLE (≥10-match) players only
+elo    = prior + (raw_elo − prior) · n / (n + K)      # K = 5, n = match count
+```
+
+With one match the Elo is pulled most of the way to its PP-expected value; by ~25
+matches it is almost entirely the player's own. A player with **no Elo at all** is
+simply the `n = 0` limit of the same formula (their Elo equals the prior) — that is
+how union members who qualify on OTR alone get an Elo. So one expression covers all
+three cases: real-and-trusted, real-but-noisy, and absent. The shrunk value is what
+feeds the score and is shown in the **Elo** column; the raw osu! rating is kept in
+the CSV (`elo_raw`) and the site tooltip. CSV flags: `elo_estimated=yes` (no real
+Elo, value is the seed), `elo_shrunk=yes` (real Elo adjusted by ≥15 points). The
+prior's coefficients and `K` are recorded in the meta sidecar (`elo_prior`).
+
+**Why K = 5 (and why 5 is statistically meaningful).** Using **OTR as an
+independent yardstick** for competitive skill (it shares no inputs with Elo or PP),
+on the ~5,400 players who have both a real Elo and a real OTR:
+
+- Grid-searching the shrinkage weight `n/(n+K)` to best predict OTR peaks flat at
+  **K ≈ 4–5**. The blended Elo (corr **0.62** with OTR for low-play players) beats
+  *both* the raw low-play Elo (0.56) and a pure PP guess (0.56) — combining the two
+  complementary signals recovers more skill than either alone.
+- Below **5 matches**, a real Elo predicts OTR **no better than PP does**
+  (r = 0.559 vs 0.563 — a statistical dead heat; Williams dependent-correlation
+  test **p = 0.84**). At **≥5 matches** it pulls clearly ahead (r = 0.704; Fisher
+  r-to-z **z = 8.3, p < 10⁻¹⁵**).
+- So 5 is the match count at which one match's worth of evidence equals the PP
+  prior — exactly the right half-weight point for the shrinkage.
+
+This was also checked *per* play-count bucket: shrinkage improves the Elo↔OTR
+correlation at **every** level (1–4: +0.056 … 50+: +0.004), so it is applied
+continuously to all players rather than gated at a threshold — its effect simply
+fades as match counts grow, so well-measured ratings move only slightly.
 
 ### Data-quality filters
 
-Three **opt-in** knobs, all **off by default** (a plain run includes every
-player who has both ranks — nothing is silently dropped). They act on the
-**ranked-play / Elo side** and are independent of `--bws` (which only adjusts the
-PP side), so they compose freely.
+The **union** anchor handles Elo noise with shrinkage (above), not a cutoff, so it
+takes the cap and provisional knobs but ignores `--min-plays`. The two legacy
+anchors (`pp`/`rankedplay`) honor all three. All are **off by default**.
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--min-plays N` | `1` (off) | Drop players with fewer than **N** ranked-play matches. An Elo computed from a handful of matches is statistically noise (osu! still publishes a rank as low as ~3 matches), so a small floor removes the least-reliable accounts. |
-| `--exclude-provisional` | off | Drop players whose rating osu! flags as **provisional** ("too few recent matches"). Off by default — provisional players are **kept and marked** instead (see below). |
-| `--max-score S` | off | Drop rows whose `hybrid_score` exceeds **S**. Because rows are ordered by score, this is identical to keeping the top-K players — a presentation trim of the low-confidence tail, not a re-ranking. |
+| `--top-k K` | union: `10000`, else off | After scoring, keep only the best **K** players — a presentation trim, not a re-ranking. The union anchor defaults this to 10,000 (osu! only ranks the top 10k anyway). |
+| `--exclude-provisional` | off | Drop players whose rating osu! flags as **provisional** ("too few recent matches"). Off by default — provisional players are **kept and marked** instead. |
+| `--min-plays N` | `1` (off) | **(pp/rankedplay only)** Drop players with fewer than **N** ranked-play matches. The union anchor shrinks low-play Elos instead, so this does nothing there. |
 
-The ranked-play board exposes each player's **play count** and **provisional
-flag** in bulk (no extra fetch), so `--min-plays` and the `provisional` marker
-cost nothing. Both new fields are written to every CSV as `plays` and
-`provisional` columns regardless of whether you filter on them.
-
-> **Picking `--min-plays`:** the ranked-play feature is young — a recent top-1000
-> snapshot had a median of ~12 plays, 58% provisional, and even #1 with only ~22
-> plays. So `--min-plays 10` cut ~39% of the board and `15` cut ~59%. A modest
-> floor like `--min-plays 5` removes the noisiest 1–4-match accounts (~16%)
-> without gutting the board; raise it as play counts grow.
+The ranked-play board exposes each player's **play count**, **provisional flag**,
+and **elo rating** in bulk (no extra fetch), so these cost nothing. `plays` and
+`provisional` are written to every CSV regardless of whether you filter on them.
 
 ### Usage
 
 ```
-python hybrid_rank.py --anchor rankedplay --top 10000   # ranked-play top 10k (default mode)
-python hybrid_rank.py --anchor rankedplay --top 10000 --bws  # tournament-aware (badge-weighted)
-python hybrid_rank.py --anchor rankedplay --top 50      # quick sample
-python hybrid_rank.py --anchor pp --top 10000           # PP top 10k (the PP max -- see cap)
-python hybrid_rank.py --no-cache                        # force a fresh pull
-python hybrid_rank.py --bws --offline                   # pure recompute (weight tweaks); reuse cache, no network
-python hybrid_rank.py --bws --offline --w-pp 0.4        # try a different pp weight (elo gets 1 - w_pp)
-python hybrid_rank.py --bws 0.99 --offline              # tune BWS base (badge strength; lower = stronger)
-python hybrid_rank.py --bws --min-plays 5               # opt-in: drop <5-match (noisy-Elo) players
-python hybrid_rank.py --bws --exclude-provisional       # opt-in: drop osu!-flagged provisional ratings
-python hybrid_rank.py --bws --offline --max-score 2000  # opt-in: trim the low-confidence tail (score > 2000)
-python hybrid_rank.py --show 50                         # print more rows
+python hybrid_rank.py --otr <key> --osu-api                      # the published board (union, real OTR, fast pp)
+python hybrid_rank.py                                            # union, OTR all seeded (no key)
+python hybrid_rank.py --offline                                  # pure recompute (weight tweaks); reuse cache, no network
+python hybrid_rank.py --offline --w-pp 0.4 --w-elo 0.3           # try different weights (OTR gets the remainder)
+python hybrid_rank.py --offline --top-k 1000                     # show only the best 1000
+python hybrid_rank.py --anchor rankedplay --top 10000 --otr <key># legacy: ranked-play-only board
+python hybrid_rank.py --anchor pp --top 10000                    # legacy: PP-only board (the PP max -- see cap)
+python hybrid_rank.py --no-cache                                 # force a fresh pull
+python hybrid_rank.py --show 50                                  # print more rows
 ```
 
 `--offline` reuses any cached file regardless of age and never hits the network
-(errors if something needed isn't cached) — so changing `W_PP`/`W_RP`, the BWS
-base, or the BWS formula re-ranks in seconds instead of re-scraping. The normal
-cache TTL is 24h.
+(errors if something needed isn't cached) — so changing the weights or the score
+formula re-ranks in seconds instead of re-scraping. The normal cache TTL is 1 week.
+(Real OTR ratings still require a network fetch the first time; once cached they
+recompute offline too.)
 
-Ranked-play mode cost: 200 ranked-play pages + 200 PP pages + one profile fetch
-per top-10k ranked-play player **outside** the PP top-10k (~5–6k of the 10k, so
-~40 min at the polite default rate). Re-runs are near-instant from cache.
+Union-mode cost (cold), all three axes capped at **top-10k**: ~200 ranked-play
+pages (RP top-10k) + 200 PP pages + a pp lookup per kept player **outside** the PP
+top-10k (~10k, incl. OTR recruits) + the ~267-page OTR sweep. With `--osu-api` the
+PP board and the pp lookups both use the osu! API (the lookups batched 50-at-a-time
+→ ~200 calls); without it both are HTML-scraped. At the polite **1 request/second**
+cap (osu! & OTR both ask for ≤60/min) — plus the `/users` calls paced to ~2.7 s for
+the osu! API cost budget — that's roughly **~15–20 min** cold. Re-runs are
+near-instant from cache; weight/formula tweaks use `--offline`.
 
-Output: `hybrid_leaderboard.csv` (hybrid_rank, user_id, username, pp_rank,
-elo_rank, **plays**, **provisional**, hybrid_score; `--bws` also adds badges +
-bws_pp_rank). `provisional` is `yes` when osu! flags the rating as not yet
-stable, else blank. A sidecar `<name>.meta.json` records the generation time,
-weights, the active filter settings, and (when `--bws` is on) the BWS base. If
-the CSV is open in Excel a numbered sibling is written instead.
+> **Speed vs. completeness.** The RP scan is capped at RP top-10k by default
+> (`RP_RANK_CAP`); a player ranked beyond that gets a *seeded* Elo instead of their
+> scanned one. Pass `--rp-max-pages <N>` to scan deeper (the full board is ~2,000
+> pages / ~33 min) if you want real Elos for lower-ranked pp/OTR players.
+
+Output: `hybrid_leaderboard.csv` with columns `hybrid_rank, user_id, username,
+pp_rank, pp, elo_rank, elo_rating, elo_raw, elo_estimated, elo_shrunk, otr_rank,
+otr_rating, otr_estimated, tournaments_played, plays, provisional, hybrid_score`.
+`elo_rating` is the **shrunk** value used in scoring; `elo_raw` is the player's
+pre-shrink osu! Elo (blank when seeded); `elo_rank` is blank when the Elo is
+seeded. The `*_estimated`/`elo_shrunk`/`provisional` flags are `yes` or blank. A
+sidecar `<name>.meta.json` records the generation time, the three weights, the
+per-axis normalization params, the real-vs-estimated OTR/Elo counts, the shrinkage
+prior (`elo_prior`), the anchor, and the active filters. If the CSV is open in
+Excel a numbered sibling is written.
 
 ### Website (GitHub Pages)
 
 The repo ships a dependency-free static site in [`docs/`](docs/) — an
 `index.html` + `app.js` that fetch the committed CSV and render a **searchable,
-sortable** table (search by username, click any column header to sort by pp /
-elo / bws / hybrid score). No backend, no build step, no tracking. Provisional
-players are marked with an **asterisk (`*`) on their Elo rank** (mirroring osu!'s
-own convention); the `plays` column is read but not displayed. A second
-**Calculator** tab lets anyone compute a hybrid score from a PP rank, Elo rank,
-badge count, BWS base, and weight — the same formula the board uses, evaluated
-live in the browser.
+sortable** table (search by username, click any column header to sort). Three
+**delta** columns show how a player's hybrid rank compares to each axis alone:
+`vs pp`, `vs elo`, `vs otr` (green ▴ gained, red ▾ lost; `—` when that axis is
+seeded). No backend, no build step, no tracking. Every real Elo is sample-size
+adjusted toward its PP-prior, so rather than a per-row symbol the **Elo number is
+itself a hover target** (shows the raw rating + match count). Only the categorical
+states carry a mark: **`*`** provisional (osu!'s own flag) and **`^`** no real Elo
+(the value is the PP seed). OTR estimates from rank are marked **`~`**. A second **Calculator** tab computes a hybrid score
+from a raw PP, Elo, and OTR — it pulls the live board's per-axis mean/std from the
+meta sidecar, so with the default weights it reproduces exactly what the board
+computed. The three weights are pre-filled with the board's split but **editable**,
+so you can see how a different PP/Elo/OTR balance would score a player (with a
+one-click reset back to the board weights).
 
 **Enable it:** push the repo to GitHub → *Settings → Pages → Build from a
 branch* → branch `main`, folder `/docs`. The board goes live at
@@ -169,7 +281,7 @@ branch* → branch `main`, folder `/docs`. The board goes live at
 **Refresh the published data** (manual — you control the scrape rate):
 
 ```
-python hybrid_rank.py --anchor rankedplay --top 10000 --bws --min-plays 5 --max-score 10000 --out docs/hybrid_leaderboard.csv  # full scrape (~40 min first time)
+python hybrid_rank.py --anchor union --otr <key> --osu-api --out docs/hybrid_leaderboard.csv  # ~15 min first time (10k caps)
 git add docs/hybrid_leaderboard.csv docs/hybrid_leaderboard.meta.json && git commit -m "refresh leaderboard" && git push
 ```
 
@@ -180,32 +292,38 @@ the repo.
 
 ### Hard cap: top 10,000
 
-osu!'s **public PP leaderboard is capped at the top 10,000** (page 200); any
-deeper page just repeats page 200. So the PP-anchored hybrid maxes out at
-`--top 10000` — the tool clamps anything larger and warns. To rank players
-beyond PP #10,000 you must fetch each one's pp rank individually from the osu!
-API (`statistics.global_rank`), since there is no bulk source past 10k. (The
-ranked-play board has no such cap — it pages fully to ~98k.)
+osu!'s **public PP leaderboard is capped at the top 10,000** (page 200); deeper
+pages just repeat page 200. The **union** anchor draws from three 10k pools — the
+PP top-10k, the ranked-play top-10k, **and the OTR top-10k** — so a player must sit
+inside at least one of the three to be considered (PP for a player outside the bulk
+board is then fetched via the osu! API batch endpoint with `--osu-api`, else
+per-profile via `statistics.global_rank` / `statistics.pp`). A player ranked
+outside **all three** pools never appears, even if their hybrid score would place
+them — so every hybrid rank is a standing *within this union sample*, not a true
+global one. (Adding the OTR pool closes the old blind spot where a tournament-only
+player who didn't grind PP or queue ranked play couldn't appear at all.)
 
 ### Scale & politeness
 
-- Cost is `ceil(top/50)` PP pages + the ranked-play scan. The ranked-play
-  board is ~1964 pages (~98k players); the scan stops early once every target
-  player is found, otherwise it covers the whole board (needed so a top-PP
-  player who simply has a deep ranked-play rank isn't wrongly skipped).
-- So **top 10k ≈ 200 + up to ~1964 ≈ ~2200 small page fetches**, not 10k.
-- `CONCURRENCY` (default 5) and `MIN_INTERVAL` (global min seconds between
-  requests, default 0.4) at the top of the script tune throughput vs politeness.
-  No Cloudflare/anti-bot block was observed at these settings.
-- Pages are cached under `.cache/` for 24h, so re-runs are near-instant.
+- Union cost (all three axes capped at top-10k): ~200 ranked-play pages + the PP
+  top-10k board + pp lookups for kept players outside it (`--osu-api` batches the
+  lookups and serves the PP board from the rankings API; else both are HTML) + the
+  ~267-page OTR sweep. `RP_RANK_CAP` / `OTR_RANK_CAP` / `PP_RANK_CAP` set the caps;
+  `--rp-max-pages` scans the RP board deeper at the cost of time.
+- `MIN_INTERVAL` (default **1.0 s** — the global minimum seconds between request
+  *starts*) caps the whole app at **≤60 requests/min**, honoring both the osu! and
+  OTR terms of use (~1 req/s). `CONCURRENCY` (default 5) only overlaps latency; the
+  shared throttle still paces starts to `MIN_INTERVAL`, so the rate never exceeds
+  1/s. Both are at the top of the script.
+- Pages are cached under `.cache/` for 1 week, so re-runs are near-instant.
 
 ### Notes
 - Pure standard library — no `pip install`.
-- The ranked-play (matchmaking) rating *is* exposed by the osu! API v2 as the
-  `matchmaking_stats` include on the user object, but the **bulk web
-  leaderboard above is more efficient** for large pulls and needs no OAuth.
-- Tune the **single weight knob `W_PP`** (0..1; elo gets `1 - W_PP`
-  automatically), plus `TOP_N`, `MODE` at the top of `hybrid_rank.py`.
+- Tune the weights **`W_PP`** and **`W_ELO`** (`W_OTR = 1 - W_PP - W_ELO` is
+  derived), the shrinkage **`ELO_SHRINK_K`**, plus `MODE` at the top of
+  `hybrid_rank.py` — or pass `--w-pp` / `--w-elo` on the command line.
+- The OTR rating model + constants are documented inline where `otr_seed_from_rank`
+  / `fetch_otr_leaderboard` are defined; they mirror `osu-tournament-rating/otr-processor`.
 
 ---
 
@@ -216,42 +334,42 @@ ranked-play board has no such cap — it pages fully to ~98k.)
 - **Elo is still inaccurate because too few players queue.** For Elo to be
   meaningful, players — especially those at the top — need to play ranked
   matches relatively frequently. (This assumes the Elo system itself is reliable
-  — it is brand new and still under active development.)
-- **Most players haven't queued even once,** so they never appear on the
-  leaderboard at all.
-- **The board only ranks the top 10,000 Ranked Play players.** osu!'s bulk leaderboards stop at 10k, so anyone outside that pool never appears even if their calculated hybrid score would allow them to be placed on the leaderboard. Every hybrid rank is a standing *within the 10k ranked play ranking sample* rather than a true global one.
-- **Tournament badges can't be counted reliably.** A profile only exposes *how
-  many* badges a player has — not whether a given badge is for a tournament, how
-  old it is, or the skill level of the event. Some badges note the placement
-  achieved, many don't, and the tooltip wording is inconsistent and often in
-  different languages, so the data can't be trusted. This tool approximates it by
-  counting only badges that link to a tournament forum thread or wiki page — but
-  some tournament badges link to nothing at all (e.g. **Corsace**), so they are
-  missed entirely.
-- **BWS is a one-dimensional proxy for tournament skill.** Badge-weighting leans
-  on a player's badge *count* as a stand-in for tournament ability, but even with
-  perfect badge data that is a blunt signal: a count says a player won or placed
-  in some events, not who they beat, how they performed, or how strong the field
-  was. A purpose-built tournament rating such as [OTR](https://otr.stagec.net/leaderboard)
-  measures this directly and would be a better fit — it may well replace BWS in
-  this project down the line.
-- **The 0.35 weight (the BWS ↔ Elo skew) is debatable.** The board leans toward
-  Elo because the PP side is already lifted by BWS, and Elo carries a recency
-  bias that should, in theory, make it a better gauge of a player's *current*
-  skill relative to others. Even so, a different weight may be equally valid — or
-  better.
-- **The board blends ranks, not normalized scores.** The hybrid score adds
-  a player's PP *rank* and Elo *rank* directly, but a rank is an ordinal position,
-  not a measured value — and two problems follow. First, the two ranks come from
-  very differently-sized pools: PP rank is a place out of millions, while Elo rank
-  is a place out of only the ~10k who queue, so the same number means very
-  different things on each axis. Second, ranks throw away magnitude — the gap
-  between #1 and #2 is enormous, while #5,000 and #5,001 are nearly identical,
-  yet every place is treated as equal. A truer approach would normalize the
-  underlying PP and Elo scores (or at least convert each rank to a percentile)
-  before blending. The current rank-blend is a deliberate trade for simplicity and
-  robustness — ranks are bounded and outlier-proof — at the cost of ignoring those
-  gaps.
+  — it is brand new and still under active development.) The low-play shrinkage
+  softens this, but it cannot manufacture data that isn't there.
+- **The pools it draws from stop at 10,000.** The board is the union of the PP
+  top-10k, the Ranked Play top-10k, and the OTR top-10k — each leaderboard is
+  capped at 10k — so a player outside *all three* never appears even if their
+  hybrid score would place them. Every hybrid rank is a standing *within this union
+  sample* rather than a true global one. (The OTR pool now covers tournament-only
+  players, but OTR itself rates only ~27k players total, so its bar is far looser
+  than the PP top-10k — a known asymmetry in how selective each pool is.)
+- **Shrinkage leans on an imperfect PP→Elo prior.** Pulling a noisy Elo toward its
+  PP-expected value assumes PP is a decent guess of competitive skill — but that
+  fit is loose (R² ≈ 0.35, it explains only about a third of the variance in Elo).
+  So a genuine over-performer who has played very few matches gets tugged toward
+  the crowd until they rack up games. Shrinkage trades a little of that edge-case
+  fairness for a lot less small-sample noise (validated: it improves agreement with
+  independent OTR ratings at every play-count level).
+- **About a third of this board's OTR ratings are estimates, not real ones.**
+  [OTR](https://otr.stagec.net/leaderboard) only rates players who have competed in
+  verified tournaments — about two-thirds of the board. Everyone else gets a rating
+  *seeded from their osu! rank* (marked `~`), which is just OTR's starting prior,
+  not evidence of actual tournament results. For those players the OTR axis adds
+  little beyond what PP already says.
+- **OTR itself is a moving, partial target.** It updates on a weekly cadence and
+  decays after about six months of tournament inactivity, so a player's tournament
+  axis can lag their current form. It also only counts *approved* matches —
+  qualifiers, scrims and unverified events don't register.
+- **The three-way weight split is debatable.** The board uses **0.30 PP / 0.35
+  Elo / 0.35 OTR**, leaning toward the competitive axes. That balance is a
+  judgement call — a different split may be equally valid, or better — and because
+  about a third of OTR is estimated today, its real influence is somewhat smaller
+  than its weight suggests.
+- **Normalization is relative to whoever is on the board.** Each axis is
+  standardized against this population, so a player's score shifts a little
+  whenever the board's makeup changes. That is the trade for measuring magnitude
+  on a common scale rather than blending raw, incomparable numbers — but it means
+  scores are standings within *this* sample, not absolute values.
 
 ### Does a hybrid leaderboard even need to exist?
 
