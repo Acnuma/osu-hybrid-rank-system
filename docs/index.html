@@ -225,15 +225,33 @@
           so a place gained on one axis is worth the same as on another — and the
           blend tracks <em>magnitude</em>, not just ordinal rank. The
           <strong>0.30 / 0.35 / 0.35</strong> split leans toward the competitive
-          axes (Elo + OTR) while still rewarding raw <strong>PP</strong>.
+          axes (Elo + OTR) while still rewarding raw <strong>PP</strong> — these are
+          the <em>base</em> weights, used when all three axes are real.
           <strong>OTR</strong> is a real tournament rating; players with no
           tournament history instead get an <strong>estimate</strong> seeded from
           their osu! rank (OTR's own starting formula), marked with a
-          <strong>tilde (<span style="color:var(--accent)">~</span>)</strong>. The
+          <strong>tilde (<span style="color:var(--accent)">~</span>)</strong>.
+          An estimated axis (a seeded OTR, or a PP-seeded Elo marked
+          <strong><span style="color:var(--accent)">^</span></strong>) carries no
+          information of its own — a seeded OTR is essentially osu! rank in
+          disguise — so it is dropped to <strong>zero weight</strong> and its share
+          is redistributed to the player's real axes. That stops an estimate from
+          quietly counting PP twice; a player with a real Elo but a seeded OTR is
+          scored <code>0.46 · z(log pp) + 0.54 · z(elo)</code>. A <em>real</em> OTR
+          is trusted in proportion to how much tournament play backs it — its weight
+          scales as <code>matches / (matches + 5)</code>, so a one- or two-match
+          rating (barely nudged off its rank-seed) leans mostly on PP and Elo, while
+          a deep tournament record earns close to its full share. The
           three <strong>vs</strong> columns (<strong>vs pp</strong>,
           <strong>vs elo</strong>, <strong>vs otr</strong>) show how many places a
           player gained (green ▴) or lost (red ▾) versus that one axis's rank alone
           (— when that axis is seeded, so there's no real rank to compare against).
+          A big <strong>vs&nbsp;pp</strong> gain — tens of thousands of places — is
+          <em>signal, not a glitch</em>: it flags a strong tournament or Ranked-Play
+          player whose PP rank is deep only because they don't farm PP. The largest
+          jumps are the <em>most</em>-confident competitive players (the board showing
+          what PP misses); the genuinely low-confidence players sit near the bottom
+          with much smaller deltas.
           An
           <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>
           next to a player's <strong>Elo</strong> marks a <strong>provisional</strong>
@@ -276,6 +294,15 @@
           evidence equals the PP prior's — exactly the right half-weight point for
           the shrinkage above.
         </p>
+        <p class="sub">
+          <strong>OTR is deliberately not shrunk like this — it doesn't need to
+          be.</strong> Unlike osu!'s raw Ranked Play Elo,
+          <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a>
+          is already a Bayesian rating seeded from osu! rank and tempered by its
+          own volatility, so a low-tournament rating is <em>already</em> anchored
+          near that prior internally. It is therefore used as-is — no extra
+          shrinkage toward PP, which would only double-count that prior.
+        </p>
         <p class="formula-label">Biggest limitations</p>
         <ul class="limitations">
           <li>
@@ -312,8 +339,14 @@
             two-thirds of the board. Everyone else gets a rating <em>seeded from their
             osu! rank</em> (marked <span style="color:var(--accent)">~</span>),
             which is just OTR's starting prior, not evidence of actual tournament
-            results. For those players the OTR axis adds little beyond what PP
-            already says.
+            results. These seeded values are <strong>excluded from scoring</strong>
+            (zero weight, redistributed to the player's real axes) precisely because
+            they'd otherwise just re-count PP — they're still shown for context, so
+            for those players the OTR column is informational only. A <em>real</em>
+            OTR backed by only a handful of tournament matches sits just off that
+            same seed, so it is <em>partially</em> down-weighted too — its share
+            scales as <code>matches / (matches + 5)</code>, and only a deep record
+            earns its full weight.
           </li>
           <li>
             <strong>OTR itself is a moving, partial target.</strong> It updates
@@ -324,11 +357,12 @@
           </li>
           <li>
             <strong>The three-way weight split is debatable.</strong> The board
-            uses <strong>0.30 PP / 0.35 Elo / 0.35 OTR</strong>, leaning toward
-            the competitive axes. That balance is a judgement call — a different
-            split may be equally valid, or better — and because about a third of
-            OTR is estimated today, its real influence is somewhat smaller than
-            its weight suggests.
+            uses base weights of <strong>0.30 PP / 0.35 Elo / 0.35 OTR</strong>,
+            leaning toward the competitive axes. That balance is a judgement call —
+            a different split may be equally valid, or better. (Reliability
+            weighting means a player missing a real axis is scored on the other two
+            at the same relative ratio, rather than having a PP-derived placeholder
+            diluting the blend.)
           </li>
           <li>
             <strong>Normalization is relative to whoever is on the board.</strong>
@@ -404,8 +438,8 @@
           <th data-key="elo_delta" title="Places gained or lost versus Elo rank alone (Elo rank − hybrid rank). — = Elo is seeded (no Elo rank).">vs elo&nbsp;<span class="arrow"></span></th>
           <th data-key="otr_delta" title="Places gained or lost versus OTR global rank (OTR rank − hybrid rank). — = OTR is seeded (no real OTR rank).">vs otr&nbsp;<span class="arrow"></span></th>
           <th data-key="pp" title="Raw performance points (pp).">pp&nbsp;<span class="arrow"></span></th>
-          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP.">elo&nbsp;<span class="arrow"></span></th>
-          <th data-key="otr_rating" title="osu! Tournament Rating. ~ = estimated from osu! rank (no verified tournament play).">otr&nbsp;<span class="arrow"></span></th>
+          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP (excluded from the score).">elo&nbsp;<span class="arrow"></span></th>
+          <th data-key="otr_rating" title="osu! Tournament Rating. Real ratings are weighted by tournament-match count (thin records lean on PP/Elo). ~ = estimated from osu! rank (no verified tournament play; excluded from the score).">otr&nbsp;<span class="arrow"></span></th>
           <th data-key="hybrid_score">score&nbsp;<span class="arrow"></span></th>
         </tr>
       </thead>
@@ -422,7 +456,10 @@
       blended with the weights below — pre-filled with the board's
       (<strong id="c-w-label">0.30 PP / 0.35 Elo / 0.35 OTR</strong>), but adjust
       them to see how a different split would rank players. PP is logged
-      before standardizing.
+      before standardizing. (This treats all three values as <em>real</em>, fully backed ratings;
+      on the board itself an <em>estimated</em> axis is dropped to zero weight, and a
+      real OTR with few tournament matches is partially down-weighted, with
+      its share redistributed to the player's real axes.)
     </p>
     <div class="calc">
       <div class="calc-grid">
@@ -492,6 +529,6 @@
       Pure standard library, no tracking.</p>
   </footer>
 
-  <script src="app.js?v=17"></script>
+  <script src="app.js?v=19"></script>
 </body>
 </html>
