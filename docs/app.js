@@ -31,8 +31,14 @@ let sortDir = -1;                    // 1 = ascending, -1 = descending
 // --- virtual-scroll state (see drawWindow) ---
 let VIEW = [];                       // current filtered + sorted rows
 let ROW_H = 37;                      // data-row height in px; measured from a real row
-const OVERSCAN = 8;                  // rows rendered just past the viewport, each side
 let drawPending = false;             // coalesces scroll/resize redraws to one per frame
+// We materialize a generous buffer of rows past the viewport and only REBUILD when
+// the viewport drifts within MARGIN_SCREENS of that buffer's edge. So ordinary (and
+// fast) scrolling just moves rows already in the DOM -- the compositor keeps up on
+// its own -- and we touch the DOM only when the buffer needs re-centering.
+let renderedStart = -1, renderedEnd = -1;  // index range currently in the DOM
+const BUFFER_SCREENS = 2;            // viewports of rows rendered past the viewport, each side
+const MARGIN_SCREENS = 0.75;         // re-center once the viewport gets this near a rendered edge
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -171,43 +177,62 @@ function render() {
     if (arrow) arrow.textContent = isSorted ? (dir === 1 ? "▲" : "▼") : "";
   });
 
-  // A fresh sort/search realigns which rows sit under the viewport; redraw the
-  // visible window. Only ~one screenful of <tr>s ever reaches the DOM.
-  drawWindow();
+  // A fresh sort/search changes the row CONTENTS, so force a rebuild even when the
+  // window's index range happens to overlap the previous one.
+  drawWindow(true);
 }
 
 // --- virtual scrolling -------------------------------------------------------
 // The board holds up to 10k rows. Materializing all of them (each <tr> carries
 // several inner nodes) means every sort/search/scroll re-parses ~60k DOM nodes —
 // THAT is the lag, not the sort. So we keep the full sorted list in VIEW and put
-// only the rows intersecting the viewport (plus a small overscan) into the DOM,
-// padding above and below with two spacer rows so the scrollbar still spans the
-// full height. The page keeps its single continuous scroll and sticky header.
+// only a windowed slice into the DOM, padding above and below with spacer rows so
+// the scrollbar still spans the full height. To stay ahead of fast/fling scrolling
+// the window is a generous buffer (BUFFER_SCREENS past the viewport each way) that
+// is rebuilt only when the viewport nears its edge — between rebuilds the in-DOM
+// rows scroll natively, so there is no per-frame DOM work to fall behind on. The
+// page keeps its single continuous scroll and sticky header.
 function scheduleDraw() {
   if (drawPending) return;
   drawPending = true;
   requestAnimationFrame(() => { drawPending = false; drawWindow(); });
 }
 
-function drawWindow() {
+function drawWindow(force) {
   const board = $("#board");
   const body = $("#rows");
   if (!board || !body) return;
   const n = VIEW.length;
-  // No data, or the calculator tab is showing (board has no layout box): bail.
-  if (n === 0 || board.offsetParent === null) { body.innerHTML = ""; return; }
+  // No data, or the calculator tab is showing (board has no layout box): bail and
+  // invalidate the rendered range so switching back rebuilds from scratch.
+  if (n === 0 || board.offsetParent === null) {
+    body.innerHTML = ""; renderedStart = renderedEnd = -1; return;
+  }
 
   const thead = board.tHead;
-  const tableTop = board.getBoundingClientRect().top + window.scrollY;
-  const rowsTop = tableTop + (thead ? thead.offsetHeight : 0);
+  const rowsTop = board.getBoundingClientRect().top + window.scrollY +
+    (thead ? thead.offsetHeight : 0);
   const vh = window.innerHeight;
   const top = window.scrollY;
+  const screen = Math.max(1, Math.ceil(vh / ROW_H));   // data rows per viewport
 
-  // First/last row whose vertical span intersects the viewport, ± overscan.
-  let start = Math.floor((top - rowsTop) / ROW_H) - OVERSCAN;
-  let end = Math.ceil((top + vh - rowsTop) / ROW_H) + OVERSCAN;
-  start = Math.max(0, Math.min(start, n));
-  end = Math.max(start, Math.min(end, n));
+  // Raw visible band: rows actually intersecting the viewport (no buffer).
+  const visStart = Math.max(0, Math.min(Math.floor((top - rowsTop) / ROW_H), n));
+  const visEnd = Math.max(visStart, Math.min(Math.ceil((top + vh - rowsTop) / ROW_H), n));
+
+  // Still covered with MARGIN_SCREENS of buffer to spare on every side that isn't
+  // already the list boundary? Then the in-DOM rows cover the viewport on their
+  // own — skip the rebuild (this is the common case while scrolling).
+  const margin = Math.ceil(screen * MARGIN_SCREENS);
+  const safeAbove = visStart - renderedStart >= margin || renderedStart === 0;
+  const safeBelow = renderedEnd - visEnd >= margin || renderedEnd === n;
+  if (!force && renderedStart >= 0 && safeAbove && safeBelow) return;
+
+  // Rebuild: materialize the visible band plus BUFFER_SCREENS of runway each side.
+  const buffer = screen * BUFFER_SCREENS;
+  const start = Math.max(0, visStart - buffer);
+  const end = Math.min(n, visEnd + buffer);
+  renderedStart = start; renderedEnd = end;
 
   // Spacers carry the off-screen height; topPad + rendered + botPad == n·ROW_H.
   const spacer = (h) =>
@@ -218,11 +243,13 @@ function drawWindow() {
   body.innerHTML = html;
 
   // Calibrate ROW_H from a real rendered row; if it differs from the estimate,
-  // redraw once with the true height (the recheck then converges, no loop).
+  // invalidate and redraw once with the true height (it then converges, no loop).
   const sample = body.querySelector("tr:not(.spacer)");
   if (sample) {
     const h = sample.offsetHeight;
-    if (h && Math.abs(h - ROW_H) > 0.5) { ROW_H = h; scheduleDraw(); }
+    if (h && Math.abs(h - ROW_H) > 0.5) {
+      ROW_H = h; renderedStart = renderedEnd = -1; scheduleDraw();
+    }
   }
 }
 
@@ -402,6 +429,11 @@ async function init() {
   window.addEventListener("scroll", scheduleDraw, { passive: true });
   window.addEventListener("resize", scheduleDraw);
   document.getElementById("tabs").addEventListener("click", scheduleDraw);
+  // Expanding/collapsing "Show more" resizes the header above the table, shifting
+  // every row but firing neither scroll nor resize — re-window on its toggle, or
+  // the board stays blank/misaligned until the next manual scroll.
+  document.querySelectorAll("details.more").forEach((d) =>
+    d.addEventListener("toggle", scheduleDraw));
 
   let debounce;
   $("#search").addEventListener("input", () => {

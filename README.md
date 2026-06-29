@@ -235,7 +235,13 @@ raw Ranked-Play Elo, OTR is already a Bayesian rating seeded from osu! rank and
 tempered by its own volatility, so a low-tournament rating is *already* shrunk
 toward that prior internally. Pulling it toward PP on top of that would
 double-count the prior and bleed the tournament axis into PP, so the OTR rating is
-used as-is (real value, or our rank-seed when the player has no real OTR).
+used as-is (real value, or our rank-seed when the player has no real OTR). This is a
+different lever from the **reliability taper** above, and the two are not in tension:
+*shrinkage* adjusts a rating's **value** (a low-play Elo's number is pulled toward its
+PP estimate), whereas the taper adjusts a rating's **weight** (a thin OTR keeps its
+exact number but counts for less in the blend). So a thin OTR is *down-weighted, never
+re-valued* — its number is left untouched; only its share of the score scales with
+match count.
 
 ### Data-quality filters
 
@@ -316,13 +322,12 @@ figures. Their `vs pp` is then enormous — and that gap *is* the signal: PP bad
 understates them, which is the whole reason the board exists.
 
 Crucially, **the biggest jumps belong to the most-confident competitive players, not the
-tail.** On a recent board the record `vs pp` (**+119,752**) was a player with a **58-match**
-verified OTR record; every one of the top jumps had a deep tournament résumé (roughly
-**22–137 OTR matches**). No evidence floor removes them — even requiring 20 matches, which
-drops ~63% of the board, keeps every single one. The genuinely low-confidence players — a
-single thin axis, two or three matches — sit near the **bottom** of the board with *much
-smaller* deltas (~15k), already pulled toward PP by Elo shrinkage and the OTR reliability
-taper.
+tail.** The largest `vs pp` values consistently come from players with a *deep* verified
+tournament record — dozens of OTR matches — rather than thin, single-axis entries. They
+need no special protection: even a strict tournament-match floor that drops most of the
+board still keeps these top jumps. The genuinely low-confidence players — a single thin
+axis, two or three matches — sit near the **bottom** of the board with *much smaller*
+deltas, already pulled toward PP by Elo shrinkage and the OTR reliability taper.
 
 So read a large `vs pp` as "PP badly understates this player," not as an error; trimming
 those rows away would delete the board's most distinctive output. If you specifically want

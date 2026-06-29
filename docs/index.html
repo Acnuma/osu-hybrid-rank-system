@@ -71,7 +71,7 @@
      on which rows are currently in the DOM. With virtual scrolling the visible row
      window changes constantly; under the default `auto` layout that made columns
      re-fit (jiggle) on every scroll. Widths are sized for each column's widest
-     possible value (e.g. the "vs pp" delta can reach ▴ +89,504). */
+     possible value (e.g. the "vs pp" delta can reach a six-figure value). */
   table {
     width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
     table-layout: fixed;
@@ -305,6 +305,14 @@
           own volatility, so a low-tournament rating is <em>already</em> anchored
           near that prior internally. It is therefore used as-is — no extra
           shrinkage toward PP, which would only double-count that prior.
+          <strong>This is a different knob from the down-weighting above, and the
+          two don't conflict:</strong> <em>shrinkage</em> changes a rating's
+          <strong>value</strong> (a low-play Elo's number is pulled toward its PP
+          estimate), while the <em>reliability taper</em> changes a rating's
+          <strong>weight</strong> (a thin OTR keeps its exact number but counts for
+          less in the blend). So a thin OTR is never re-valued the way a low-play Elo
+          is — its rating is left untouched — it just carries less influence in the
+          score until enough tournament matches back it.
         </p>
         <p class="formula-label">Biggest limitations</p>
         <ul class="limitations">
@@ -425,7 +433,7 @@
       <colgroup>
         <col style="width:84px">   <!-- #     (rank, up to 10,000) -->
         <col>                       <!-- Player (flexes to fill remaining width) -->
-        <col style="width:100px">  <!-- vs pp  (delta up to ▴ +89,504) -->
+        <col style="width:100px">  <!-- vs pp  (delta up to a six-figure value) -->
         <col style="width:100px">  <!-- vs elo -->
         <col style="width:100px">  <!-- vs otr -->
         <col style="width:88px">   <!-- pp    (up to 33,791) -->
@@ -532,6 +540,6 @@
       Pure standard library, no tracking.</p>
   </footer>
 
-  <script src="app.js?v=20"></script>
+  <script src="app.js?v=21"></script>
 </body>
 </html>
