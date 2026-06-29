@@ -13,7 +13,7 @@ python hybrid_rank.py --anchor union --otr <key> --osu-api --out docs/hybrid_lea
 - `--anchor union` — player set = (**PP top-10k**) ∪ (**Ranked Play top-10k**) ∪ (**OTR top-10k**), the most complete pool (default)
 - `--otr <key>` — fetch real **OTR** tournament ratings from the otr.stagec.net API (key required; see below)
 - `--osu-api` — use the osu! API v2 for fast **batched** pp lookups of players outside the PP top-10k (50/request, vs. one HTML scrape each); reads `OSU_CLIENT_ID`/`OSU_CLIENT_SECRET` from the env (see below)
-- base weights `W_PP = 0.30`, `W_ELO = 0.35`, `W_OTR = 0.35` (defaults) → `score = 0.30·z(log pp) + 0.35·z(elo) + 0.35·z(otr)` for all-real players; a **seeded** axis (estimated Elo/OTR) is dropped to zero weight and its share redistributed to the player's real axes, and a real OTR is further tapered by its tournament-match count ([reliability weighting](#formula))
+- base weights `W_PP = 0.33`, `W_ELO = 0.34`, `W_OTR = 0.33` (defaults) → `score = 0.33·z(log pp) + 0.34·z(elo) + 0.33·z(otr)` for all-real players; a **seeded** axis (estimated Elo/OTR) is dropped to zero weight and its share redistributed to the player's real axes, and a real OTR is further tapered by its tournament-match count ([reliability weighting](#formula))
 - mode: `osu` standard
 
 A player appears if they carry at least one **real competitive rating** — a real
@@ -45,13 +45,18 @@ Each axis is **standardized** across the board population (z-score), then blende
 ```
 z(x)         = (x - mean) / std        # mean/std measured over the whole board
 hybrid_score = w_pp·z(log pp) + w_elo·z(elo) + w_otr·z(otr)   # higher = better
-               base weights: W_PP = 0.30, W_ELO = 0.35, W_OTR = 0.35
+               base weights: W_PP = 0.33, W_ELO = 0.34, W_OTR = 0.33
 ```
 
 PP is **logged** before standardizing because it is heavily right-skewed. Sorted
 **descending** by `hybrid_score`. Ties break deterministically by elo rating,
 then pp, then user_id. The per-axis `mean`/`std` are recorded in the `.meta.json`
-sidecar so the website calculator can reproduce any score exactly.
+sidecar so the website calculator can reproduce any score exactly. The
+normalization population is the **whole board, seeded placeholders included**: a
+seeded Elo/OTR is zero-weighted in its *own* player's blend (above) but still
+contributes to that axis's `mean`/`std`, so it helps define the scale every real
+rating is standardized against. Seeds are therefore kept in the data rather than
+blanked; dropping them would shift each axis's baseline and re-rank the board.
 
 **Reliability weighting (per player).** The weights `w_pp/w_elo/w_otr` equal the
 base `W_PP/W_ELO/W_OTR` only when all three axes are *real*. A **seeded** axis
@@ -60,7 +65,7 @@ rank (corr ≈ 0.995 with pp) and a seeded Elo *is* the PP-prior — so weightin
 like a real measurement just double-counts pp. Any seeded axis is therefore given
 **zero** weight and its share is redistributed proportionally to the player's real
 axes (e.g. a player with a real Elo but a seeded OTR is scored
-`0.46·z(log pp) + 0.54·z(elo)`). Every board player has at least one real
+`0.49·z(log pp) + 0.51·z(elo)`). Every board player has at least one real
 competitive axis, so the real weights never sum to zero. A **real** OTR is
 additionally tapered by how much tournament play backs it — its weight scales as
 `matches / (matches + 5)`, so a one- or two-match rating (barely nudged off its
@@ -72,6 +77,14 @@ toward the PP-prior; see below.) Without this, ~⅓ of the board (the seeded-OTR
 players) effectively had pp counted ~twice, and a single tournament match flipped a
 near-seed rating to full weight; the fix leaves the top of the board virtually
 unchanged while correcting the seeded and thin-record mid-board.
+
+**Why not hand-pick a two-axis split?** Renormalizing the base weights is
+deliberately the *only* rule for a player missing an axis: it keeps one formula
+for every case and leaves the taper intact. Hard-coding a separate split (say
+forcing `0.4 / 0.6`) would re-open the thin-OTR loophole the taper just closed,
+since a one- or two-match rating would snap back to a large fixed share; it would
+also lean *harder* on a lone competitive axis that, having no second axis to
+corroborate it, warrants more caution, not less.
 
 ### Anchor modes
 
@@ -414,10 +427,11 @@ player who didn't grind PP or queue ranked play couldn't appear at all.)
   [OTR](https://otr.stagec.net/leaderboard) only rates players who have competed in
   verified tournaments — about two-thirds of the board. Everyone else gets a rating
   *seeded from their osu! rank* (marked `~`), which is just OTR's starting prior,
-  not evidence of actual tournament results. These seeded values are **excluded from
-  scoring** (zero weight — see [reliability weighting](#formula)) precisely because
-  they'd otherwise just re-count pp; they're still shown for context, so for those
-  players the OTR column is informational only. A *real* OTR backed by only a
+  not evidence of actual tournament results. These seeded values are **kept out of a player's own weighted blend** (zero weight — see [reliability weighting](#formula)) precisely because
+  they'd otherwise just re-count pp; they're still shown for context and still feed the per-axis
+  normalization (each axis's mean/std is computed over the full board, seeds
+  included), so they aren't idle: the zero weight applies only to their own
+  player's blend. A *real* OTR backed by only a
   handful of tournament matches sits just off that same seed, so it is *partially*
   down-weighted too — its share scales as `matches / (matches + 5)`, and only a
   deep tournament record earns its full weight.
@@ -426,7 +440,7 @@ player who didn't grind PP or queue ranked play couldn't appear at all.)
   axis can lag their current form. It also only counts *approved* matches —
   qualifiers, scrims and unverified events don't register.
 - **The three-way weight split is debatable.** The board uses base weights of
-  **0.30 PP / 0.35 Elo / 0.35 OTR**, leaning toward the competitive axes. That
+  **0.33 PP / 0.34 Elo / 0.33 OTR** — the three axes weighted near-equally. That
   balance is a judgement call — a different split may be equally valid, or better.
   (Reliability weighting means a player missing a real axis is scored on the other
   two at the same relative ratio, rather than having a pp-derived placeholder

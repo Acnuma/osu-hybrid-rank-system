@@ -11,7 +11,7 @@ const CSV_URL = "hybrid_leaderboard.csv";
 const META_URL = "hybrid_leaderboard.meta.json";
 
 // Default weights, used only if the meta sidecar is missing them.
-const DEFAULT_WEIGHTS = { pp: 0.30, elo: 0.35, otr: 0.35 };
+const DEFAULT_WEIGHTS = { pp: 0.33, elo: 0.34, otr: 0.33 };
 
 // column key -> numeric? Order here is irrelevant; the <thead> drives layout.
 const NUMERIC = new Set([
