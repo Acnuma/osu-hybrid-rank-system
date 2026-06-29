@@ -16,7 +16,8 @@ const DEFAULT_WEIGHTS = { pp: 0.30, elo: 0.35, otr: 0.35 };
 // column key -> numeric? Order here is irrelevant; the <thead> drives layout.
 const NUMERIC = new Set([
   "hybrid_rank", "pp_rank", "pp", "elo_rank", "elo_rating", "elo_raw",
-  "otr_rank", "otr_rating", "tournaments_played", "plays", "hybrid_score",
+  "otr_rank", "otr_rating", "tournaments_played", "matches_played", "plays",
+  "hybrid_score",
   "elo_delta",  // derived (elo_rank - hybrid_rank); null when Elo is seeded
   "pp_delta",   // TEMP derived (pp_rank - hybrid_rank) for testing the vs-pp column
   "otr_delta",  // TEMP derived (otr_rank - hybrid_rank); null when OTR is seeded
@@ -87,10 +88,19 @@ function rowHTML(r) {
   // OTR seeded-from-rank: highlight the whole value the same way a seeded Elo is
   // (bold accent, `~` mark, tooltip over the entire number), not just the marker.
   // Real OTR ratings link to the player's OTR profile; seeded estimates do not
-  // (those players aren't in OTR's database, so the profile would 404).
-  const otrCell = r.otr_estimated
-    ? `<abbr class="prov" title="Estimated from osu! rank — no verified tournament play, so OTR's starting prior is used.">${fmt("otr_rating", r.otr_rating)}~</abbr>`
-    : `<a class="user" href="https://otr.stagec.net/players/${r.user_id}" target="_blank" rel="noopener" title="View tournament profile on otr.stagec.net">${fmt("otr_rating", r.otr_rating)}</a>`;
+  // (those players aren't in OTR's database, so the profile would 404). A real
+  // OTR's score weight is tapered by match count, so the hover reveals how much
+  // tournament play backs it (absent on pre-reliability CSVs -> generic tooltip).
+  let otrCell;
+  if (r.otr_estimated) {
+    otrCell = `<abbr class="prov" title="Estimated from osu! rank (no verified tournament play). Excluded from the score — shown for context only.">${fmt("otr_rating", r.otr_rating)}~</abbr>`;
+  } else {
+    const m = r.matches_played;
+    const title = Number.isFinite(m)
+      ? `Real tournament rating over ${m.toLocaleString("en-US")} ${m === 1 ? "match" : "matches"}. Its weight in the score scales with match count, so a thin record leans more on PP/Elo. Click to view the otr.stagec.net profile.`
+      : "View tournament profile on otr.stagec.net";
+    otrCell = `<a class="user" href="https://otr.stagec.net/players/${r.user_id}" target="_blank" rel="noopener" title="${title}">${fmt("otr_rating", r.otr_rating)}</a>`;
+  }
   // Shrinkage applies to EVERY real Elo (continuously), so a per-row "shrunk"
   // symbol would just be threshold noise. Instead the Elo NUMBER itself is the
   // hover target: mousing over it reveals the raw rating + match count. Only the
@@ -98,7 +108,7 @@ function rowHTML(r) {
   // "not yet stable" flag) and `^` seeded (no real Elo at all; a PP estimate).
   let eloCell;
   if (r.elo_estimated) {
-    eloCell = `<abbr class="prov" title="Estimated from PP — never queued ranked play, so Elo is inferred from pp.">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
+    eloCell = `<abbr class="prov" title="Estimated from PP (never queued ranked play). Excluded from the score — shown for context only.">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
   } else {
     const rawTxt = Number.isNaN(r.elo_raw) ? "?" : r.elo_raw.toLocaleString("en-US");
     const matches = `${r.plays} ranked ${r.plays === 1 ? "match" : "matches"}`;

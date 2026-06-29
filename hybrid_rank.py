@@ -15,7 +15,17 @@ common, normalized scale -- so it measures *magnitude*, not just ordinal place:
 Each axis is standardized across the board population (z-score; pp is logged
 first because it's heavily right-skewed), then blended (higher is better):
 
-    hybrid_score = W_PP * z_pp + W_ELO * z_elo + W_OTR * z_otr
+    hybrid_score = w_pp * z_pp + w_elo * z_elo + w_otr * z_otr
+
+The weights are *reliability-weighted* per player: a **seeded** axis carries no
+independent signal -- a seeded OTR is a deterministic transform of osu! rank
+(corr ~0.995 with pp) and a seeded Elo is the PP-prior itself -- so weighting it
+like a real measurement just double-counts pp. Any seeded axis is therefore given
+**zero** weight. A *real* OTR is further tapered by how much tournament play backs
+it (weight *= matches/(matches+OTR_RELIABILITY_K)), since one or two matches barely
+move the rating off its rank-seed; a seeded OTR is just the matches=0 limit of that
+taper. Each axis's freed share is redistributed to the player's remaining real axes.
+With deep real Elo and OTR the weights are exactly the base W_PP / W_ELO / W_OTR.
 
 Players are sorted *descending* by hybrid_score to produce a "hybrid rank".
 Ties break deterministically by elo rating, then pp, then user id.
@@ -103,6 +113,13 @@ OTR_SEED_LEFT = 250.0     # slope for ranks better than center (z < 0)
 OTR_SEED_RIGHT = 200.0    # slope for ranks worse than center (z > 0)
 OTR_SEED_FLOOR = 500.0    # INITIAL_RATING_FLOOR
 OTR_SEED_CEIL = 2000.0    # INITIAL_RATING_CEILING
+# Reliability taper for a REAL OTR: weight *= matches / (matches + K). One or two
+# tournament matches barely move the rating off its rank-seed (which is ~pp), so a
+# thin real OTR re-counts pp and amplifies match-luck if trusted in full. K is the
+# match count at which OTR earns half its base weight; a seeded OTR is the
+# matches=0 limit (weight 0), so the taper is continuous across the seed boundary.
+# At K=5: 1 match -> 17% weight, 3 -> 38%, 5 -> 50%, 22 -> 81%, 58 -> 92%.
+OTR_RELIABILITY_K = 5.0
 # The OTR API shares ONE token-bucket rate limit (~60 requests / 60s, and it
 # sends no Retry-After header) across its endpoints, so a fast leaderboard sweep
 # trips HTTP 429. Measured: an exhausted bucket recovers in ~62s. We pace the
@@ -740,9 +757,18 @@ class Row:
     elo_estimated: bool = False   # True == no real elo: elo_rating IS the PP-prior seed
     elo_shrunk: bool = False      # True == real elo materially pulled toward the prior
     otr_rank: int | None = None   # OTR global rank (real OTR entries only)
+    matches_played: int = 0  # OTR verified matches (0 when seeded); drives the OTR reliability taper
     z_pp: float = 0.0        # standardized log(pp)
     z_elo: float = 0.0       # standardized elo rating
     z_otr: float = 0.0       # standardized OTR rating
+    # Effective per-player blend weights. Equal to the base W_PP/W_ELO/W_OTR for a
+    # player with deep real axes, but a *seeded* axis (no real elo / no real otr --
+    # its value is just a PP-derived prior, not independent evidence) is given zero
+    # weight, and a real OTR is tapered by its match count; freed weight is
+    # redistributed to the player's other real axes. See _effective_weights.
+    w_pp: float = W_PP
+    w_elo: float = W_ELO
+    w_otr: float = W_OTR
     hybrid_score: float = 0.0  # weighted blend of the z-scores (higher = better)
 
 
@@ -752,6 +778,7 @@ class Filters:
     min_plays: int = 1            # drop players with fewer ranked-play matches
     exclude_provisional: bool = False  # drop players osu! flags as provisional
     top_k: int | None = None      # keep only the best-K rows after scoring
+    min_otr_matches: int = 0      # >0: keep only players with a REAL OTR of >= N matches
 
     def keep_player(self, plays: int, provisional: bool) -> bool:
         if plays < self.min_plays:
@@ -769,6 +796,53 @@ def _standardize(values: list[float]) -> tuple[float, float]:
     return mean, (sd if sd > 1e-9 else 1.0)
 
 
+def _effective_weights(r: Row) -> tuple[float, float, float]:
+    """Reliability-weighted blend weights for one player, summing to 1.
+
+    A *seeded* axis is not independent evidence -- a seeded OTR is a deterministic
+    transform of osu! rank (corr ~0.995 with pp), and a seeded Elo is the PP-prior
+    itself -- so weighting it like a real measurement double-counts pp. We therefore
+    give any seeded axis **zero** weight.
+
+    A *real* OTR is additionally tapered by how much tournament play backs it:
+    weight *= matches / (matches + OTR_RELIABILITY_K). One or two matches barely move
+    the rating off its rank-seed (~pp), so trusting such a thin rating in full re-counts
+    pp and amplifies match-luck; the taper trusts OTR only as a real résumé accumulates.
+    A seeded OTR is just the matches=0 limit (taper 0), so the rule is continuous across
+    the seed boundary. Elo needs no weight taper of its own -- its thin-sample noise is
+    already handled upstream by shrinking the *value* toward the PP-prior (n/(n+K)).
+
+    The freed share of every zeroed/tapered axis is redistributed proportionally (the
+    sum-to-1 renormalization below). PP is always real and fully weighted, so the total
+    is always >= W_PP > 0 and the weights never blow up. A player with deep real Elo and
+    OTR keeps the base weights.
+    """
+    w_pp = W_PP
+    w_elo = 0.0 if r.elo_estimated else W_ELO
+    if r.otr_estimated:
+        w_otr = 0.0
+    else:
+        w_otr = W_OTR * r.matches_played / (r.matches_played + OTR_RELIABILITY_K)
+    total = w_pp + w_elo + w_otr
+    return w_pp / total, w_elo / total, w_otr / total
+
+
+def _apply_otr_floor(rows: list[Row], filt: Filters) -> list[Row]:
+    """Opt-in tournament floor (--min-otr-matches): keep only players whose OTR is
+    real and backed by >= filt.min_otr_matches matches. Applied BEFORE normalization
+    so the surviving cohort is scored against itself (symmetric with --min-plays).
+    A no-op at the default 0, so the standard board is unaffected."""
+    n = filt.min_otr_matches
+    if n <= 0:
+        return rows
+    before = len(rows)
+    rows = [r for r in rows if not r.otr_estimated and r.matches_played >= n]
+    print(f"      --min-otr-matches {n}: kept {len(rows)} of {before} "
+          f"(dropped {before - len(rows)} seeded or < {n} OTR matches)",
+          file=sys.stderr)
+    return rows
+
+
 def normalize_and_score(rows: list[Row]) -> dict:
     """Standardize each axis across the population and write z-scores + the
     weighted hybrid score onto every row. Returns the normalization parameters
@@ -783,7 +857,11 @@ def normalize_and_score(rows: list[Row]) -> dict:
         r.z_pp = (lp - m_pp) / s_pp
         r.z_elo = (r.elo_rating - m_elo) / s_elo
         r.z_otr = (r.otr_rating - m_otr) / s_otr
-        r.hybrid_score = W_PP * r.z_pp + W_ELO * r.z_elo + W_OTR * r.z_otr
+        # Reliability weighting (see _effective_weights): seeded axes get zero weight
+        # and a thin real OTR is tapered by its match count; the freed share is
+        # redistributed to the player's other real axes.
+        r.w_pp, r.w_elo, r.w_otr = _effective_weights(r)
+        r.hybrid_score = r.w_pp * r.z_pp + r.w_elo * r.z_elo + r.w_otr * r.z_otr
     return {
         "pp": {"mean": round(m_pp, 6), "std": round(s_pp, 6), "log": True},
         "elo": {"mean": round(m_elo, 6), "std": round(s_elo, 6), "log": False},
@@ -831,17 +909,20 @@ def _assemble(cand: list[Candidate], otr_key: str | None, use_cache: bool,
         if entry:
             otr_rating = float(entry["rating"])
             tp = int(entry.get("tournamentsPlayed") or 0)
+            mp = int(entry.get("matchesPlayed") or 0)
             otr_rank = int(entry["globalRank"]) if entry.get("globalRank") else None
             estimated = False
         else:
             otr_rating = otr_seed_from_rank(pp_rank)
-            tp = 0
+            tp = mp = 0
             otr_rank = None
             estimated = True
         # These anchors only keep players with a real Elo, so no shrink/seed here.
         rows.append(Row(0, uid, name, pp_rank, pp, rp_rank, elo, otr_rating,
-                        estimated, tp, plays, prov, elo_raw=elo, otr_rank=otr_rank))
+                        estimated, tp, plays, prov, elo_raw=elo, otr_rank=otr_rank,
+                        matches_played=mp))
 
+    rows = _apply_otr_floor(rows, filt)
     norm = normalize_and_score(rows)
     rows, trimmed = _finalize(rows, filt)
     return rows, norm, trimmed
@@ -1040,15 +1121,18 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
         if entry:
             otr_rating = float(entry["rating"])
             tp = int(entry.get("tournamentsPlayed") or 0)
+            mp = int(entry.get("matchesPlayed") or 0)
             otr_rank = int(entry["globalRank"]) if entry.get("globalRank") else None
             otr_est = False
         else:
             otr_rating = otr_seed_from_rank(pp_rank)
-            tp, otr_rank, otr_est = 0, None, True
+            tp, mp, otr_rank, otr_est = 0, 0, None, True
         rows.append(Row(0, u, names.get(u, str(u)), pp_rank, ppv, rp_rank, elo,
                         otr_rating, otr_est, tp, plays, prov, elo_raw=elo_raw,
-                        elo_estimated=elo_est, elo_shrunk=elo_shrunk, otr_rank=otr_rank))
+                        elo_estimated=elo_est, elo_shrunk=elo_shrunk, otr_rank=otr_rank,
+                        matches_played=mp))
 
+    rows = _apply_otr_floor(rows, filt)
     norm = normalize_and_score(rows)
     rows, trimmed = _finalize(rows, filt)
     real_otr = sum(1 for r in rows if not r.otr_estimated)
@@ -1092,6 +1176,15 @@ def _write_meta(csv_path: str, rows: list[Row], norm: dict,
         "weight_pp": round(W_PP, 4),
         "weight_elo": round(W_ELO, 4),
         "weight_otr": round(W_OTR, 4),
+        # Per-player reliability weighting: a seeded axis (estimated Elo or OTR) gets
+        # zero weight, and a real OTR is tapered by its match count
+        # (weight *= matches/(matches+otr_reliability_k)); freed weight is redistributed
+        # to the player's other real axes, so the base weights above apply only to deep
+        # all-real résumés.
+        "reliability_weighting": "seeded axes (estimated elo/otr) get zero weight; a "
+                                 "real OTR is tapered by matches/(matches+k_otr); freed "
+                                 "weight redistributed to the player's other real axes",
+        "otr_reliability_k": OTR_RELIABILITY_K,
         "norm": norm,
         "otr_real": len(rows) - otr_estimated,
         "otr_estimated": otr_estimated,
@@ -1103,6 +1196,7 @@ def _write_meta(csv_path: str, rows: list[Row], norm: dict,
         payload["min_plays"] = filt.min_plays
         payload["exclude_provisional"] = filt.exclude_provisional
         payload["top_k"] = filt.top_k
+        payload["min_otr_matches"] = filt.min_otr_matches
     if extra:
         payload.update(extra)   # anchor, elo_prior, ...
     with open(meta_path, "w", encoding="utf-8") as fh:
@@ -1126,7 +1220,8 @@ def write_csv(rows: list[Row], path: str, norm: dict,
         w.writerow(["hybrid_rank", "user_id", "username", "pp_rank", "pp",
                     "elo_rank", "elo_rating", "elo_raw", "elo_estimated", "elo_shrunk",
                     "otr_rank", "otr_rating", "otr_estimated",
-                    "tournaments_played", "plays", "provisional", "hybrid_score"])
+                    "tournaments_played", "matches_played", "plays", "provisional",
+                    "hybrid_score"])
         for r in rows:
             w.writerow([r.hybrid_rank, r.user_id, r.username, r.pp_rank,
                         f"{r.pp:.0f}",
@@ -1136,7 +1231,7 @@ def write_csv(rows: list[Row], path: str, norm: dict,
                         "yes" if r.elo_shrunk else "",
                         "" if r.otr_rank is None else r.otr_rank,
                         f"{r.otr_rating:.0f}", "yes" if r.otr_estimated else "",
-                        r.tournaments_played, r.plays,
+                        r.tournaments_played, r.matches_played, r.plays,
                         "yes" if r.provisional else "", repr(r.hybrid_score)])
     _write_meta(path, rows, norm, filt, extra)
     return path
@@ -1207,6 +1302,11 @@ def main() -> None:
     ap.add_argument("--top-k", type=int, default=None, metavar="K",
                     help="presentation cap: after scoring, keep only the best K "
                          "players (drops the low-confidence tail).")
+    ap.add_argument("--min-otr-matches", type=int, default=0, metavar="N",
+                    help="tournament floor (all anchors): keep only players with a "
+                         "REAL OTR rating backed by >= N tournament matches, dropping "
+                         "seeded and thin-OTR players. Applied BEFORE normalization, so "
+                         "survivors are scored against this cohort. Default 0 (off).")
     ap.add_argument("--w-pp", type=float, default=W_PP, metavar="0..1",
                     help=f"weight on pp performance (default {W_PP})")
     ap.add_argument("--w-elo", type=float, default=W_ELO, metavar="0..1",
@@ -1229,6 +1329,8 @@ def main() -> None:
         ap.error(f"--min-plays must be >= 1 (got {args.min_plays})")
     if args.top_k is not None and args.top_k < 1:
         ap.error(f"--top-k must be >= 1 (got {args.top_k})")
+    if args.min_otr_matches < 0:
+        ap.error(f"--min-otr-matches must be >= 0 (got {args.min_otr_matches})")
     # The union board scores the full ~13k union then shows the best 10k by default
     # (osu! only ranks the top 10k anyway); override with an explicit --top-k.
     top_k = args.top_k
@@ -1236,7 +1338,8 @@ def main() -> None:
         top_k = PP_RANK_CAP
     filt = Filters(min_plays=args.min_plays,
                    exclude_provisional=args.exclude_provisional,
-                   top_k=top_k)
+                   top_k=top_k,
+                   min_otr_matches=args.min_otr_matches)
 
     # --otr: absent -> seed-only; bare -> key from OTR_API_KEY env; with a value
     # -> that key. The key is never printed.
