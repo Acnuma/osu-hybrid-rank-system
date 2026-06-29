@@ -198,24 +198,22 @@
       <button class="tab" data-view="calculator">Calculator</button>
     </nav>
     <p class="sub lb-only">
-      This leaderboard <strong>scores</strong> (higher is better) the players in the
-      <strong>union of the PP top-10k, the Ranked Play top-10k, and the OTR top-10k</strong> — then
-      shows the best 10,000 — by blending three signals on one common,
-      normalized scale: their <strong>PP</strong>
-      their <strong>Elo rating</strong> (Ranked Play), and their
-      <strong><a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a></strong>
-      (osu! Tournament Rating), with a slight skew toward the two competitive
-      axes. A player must carry at least one <em>real</em> competitive rating (a
-      real Elo or a real OTR) to appear. Low-play Elos aren't thrown away — they're
-      <strong>statistically shrunk</strong> toward the rating their PP predicts, so
-      a handful of noisy matches can't inflate a player's standing.
+      This leaderboard <strong>scores</strong> every player ranked in the
+      <strong>union of the top-10k PP, Ranked Play, and OTR rankings</strong> by
+      combining three measures (<strong>PP</strong>, <strong>Elo</strong>, and
+      <strong><a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a></strong>),
+      weighted near-equally on one shared scale. A player must carry at least one
+      <strong>real</strong> Elo or OTR to appear. Low-playcount Elos are
+      <strong>statistically shrunk</strong> toward the rating their PP predicts, and
+      an OTR with few or no tournament matches behind it is
+      <strong>down-weighted</strong>.
     </p>
     <details class="more lb-only">
       <summary>Show more</summary>
       <div class="more-body">
         <p class="formula-label">Formula used for this leaderboard:</p>
         <div class="formula">
-          <code>score = 0.30 × z(log pp) + 0.35 × z(elo) + 0.35 × z(otr)</code>
+          <code>score = 0.33 × z(log pp) + 0.34 × z(elo) + 0.33 × z(otr)</code>
         </div>
         <p class="sub">
           Each of the three axes is <strong>standardized</strong> across the
@@ -224,8 +222,8 @@
           all three on the same <em>standard-deviations-from-average</em> scale,
           so a place gained on one axis is worth the same as on another — and the
           blend tracks <em>magnitude</em>, not just ordinal rank. The
-          <strong>0.30 / 0.35 / 0.35</strong> split leans toward the competitive
-          axes (Elo + OTR) while still rewarding raw <strong>PP</strong> — these are
+          <strong>0.33 / 0.34 / 0.33</strong> split weights all three axes
+          near-equally (only a hair more on Elo than raw <strong>PP</strong>) — these are
           the <em>base</em> weights, used when all three axes are real.
           <strong>OTR</strong> is a real tournament rating; players with no
           tournament history instead get an <strong>estimate</strong> seeded from
@@ -237,7 +235,12 @@
           disguise — so it is dropped to <strong>zero weight</strong> and its share
           is redistributed to the player's real axes. That stops an estimate from
           quietly counting PP twice; a player with a real Elo but a seeded OTR is
-          scored <code>0.46 · z(log pp) + 0.54 · z(elo)</code>. A <em>real</em> OTR
+          scored <code>0.49 · z(log pp) + 0.51 · z(elo)</code>. Zero weight here means only that the seed adds nothing to
+          <em>that player's own</em> blend; the seeded value is still kept because
+          each axis is standardized over the <strong>whole board, seeds
+          included</strong>, so it helps set the average and spread every real
+          rating is measured against. Blanking the seeds would shift that baseline
+          and re-rank the board, which is why they stay. A <em>real</em> OTR
           is trusted in proportion to how much tournament play backs it — its weight
           scales as <code>matches / (matches + 5)</code>, so a one- or two-match
           rating (barely nudged off its rank-seed) leans mostly on PP and Elo, while
@@ -339,10 +342,10 @@
             two-thirds of the board. Everyone else gets a rating <em>seeded from their
             osu! rank</em> (marked <span style="color:var(--accent)">~</span>),
             which is just OTR's starting prior, not evidence of actual tournament
-            results. These seeded values are <strong>excluded from scoring</strong>
+            results. These seeded values are <strong>kept out of a player's own weighted blend</strong>
             (zero weight, redistributed to the player's real axes) precisely because
             they'd otherwise just re-count PP — they're still shown for context, so
-            for those players the OTR column is informational only. A <em>real</em>
+            for those players the OTR column is shown for reference, but it is <em>not</em> inert: each axis is standardized over the whole board, so the seed still feeds that axis's mean and spread (the scale every real rating is judged against). A <em>real</em>
             OTR backed by only a handful of tournament matches sits just off that
             same seed, so it is <em>partially</em> down-weighted too — its share
             scales as <code>matches / (matches + 5)</code>, and only a deep record
@@ -357,8 +360,8 @@
           </li>
           <li>
             <strong>The three-way weight split is debatable.</strong> The board
-            uses base weights of <strong>0.30 PP / 0.35 Elo / 0.35 OTR</strong>,
-            leaning toward the competitive axes. That balance is a judgement call —
+            uses base weights of <strong>0.33 PP / 0.34 Elo / 0.33 OTR</strong>,
+            weighting the three axes near-equally. That balance is a judgement call —
             a different split may be equally valid, or better. (Reliability
             weighting means a player missing a real axis is scored on the other two
             at the same relative ratio, rather than having a PP-derived placeholder
@@ -438,8 +441,8 @@
           <th data-key="elo_delta" title="Places gained or lost versus Elo rank alone (Elo rank − hybrid rank). — = Elo is seeded (no Elo rank).">vs elo&nbsp;<span class="arrow"></span></th>
           <th data-key="otr_delta" title="Places gained or lost versus OTR global rank (OTR rank − hybrid rank). — = OTR is seeded (no real OTR rank).">vs otr&nbsp;<span class="arrow"></span></th>
           <th data-key="pp" title="Raw performance points (pp).">pp&nbsp;<span class="arrow"></span></th>
-          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP (excluded from the score).">elo&nbsp;<span class="arrow"></span></th>
-          <th data-key="otr_rating" title="osu! Tournament Rating. Real ratings are weighted by tournament-match count (thin records lean on PP/Elo). ~ = estimated from osu! rank (no verified tournament play; excluded from the score).">otr&nbsp;<span class="arrow"></span></th>
+          <th data-key="elo_rating" title="osu! Ranked Play (matchmaking) Elo rating, sample-size adjusted. Hover a value for its raw rating + match count. * = provisional, ^ = estimated from PP (zero weight in its own score).">elo&nbsp;<span class="arrow"></span></th>
+          <th data-key="otr_rating" title="osu! Tournament Rating. Real ratings are weighted by tournament-match count (thin records lean on PP/Elo). ~ = estimated from osu! rank (no verified tournament play; zero weight in its own score).">otr&nbsp;<span class="arrow"></span></th>
           <th data-key="hybrid_score">score&nbsp;<span class="arrow"></span></th>
         </tr>
       </thead>
@@ -454,7 +457,7 @@
       player's three raw values; each is <strong>standardized</strong> against the
       live board (its mean and standard deviation come from the latest data) and
       blended with the weights below — pre-filled with the board's
-      (<strong id="c-w-label">0.30 PP / 0.35 Elo / 0.35 OTR</strong>), but adjust
+      (<strong id="c-w-label">0.33 PP / 0.34 Elo / 0.33 OTR</strong>), but adjust
       them to see how a different split would rank players. PP is logged
       before standardizing. (This treats all three values as <em>real</em>, fully backed ratings;
       on the board itself an <em>estimated</em> axis is dropped to zero weight, and a
@@ -484,15 +487,15 @@
         <div class="calc-grid">
           <label class="calc-field">
             <span>W · PP</span>
-            <input id="c-wpp" type="number" min="0" max="1" step="0.05" value="0.30" inputmode="decimal">
+            <input id="c-wpp" type="number" min="0" max="1" step="0.05" value="0.33" inputmode="decimal">
           </label>
           <label class="calc-field">
             <span>W · Elo</span>
-            <input id="c-welo" type="number" min="0" max="1" step="0.05" value="0.35" inputmode="decimal">
+            <input id="c-welo" type="number" min="0" max="1" step="0.05" value="0.34" inputmode="decimal">
           </label>
           <label class="calc-field">
             <span>W · OTR</span>
-            <input id="c-wotr" type="number" min="0" max="1" step="0.05" value="0.35" inputmode="decimal">
+            <input id="c-wotr" type="number" min="0" max="1" step="0.05" value="0.33" inputmode="decimal">
           </label>
         </div>
         <p class="calc-wsum" id="c-wsum"></p>
@@ -529,6 +532,6 @@
       Pure standard library, no tracking.</p>
   </footer>
 
-  <script src="app.js?v=19"></script>
+  <script src="app.js?v=20"></script>
 </body>
 </html>

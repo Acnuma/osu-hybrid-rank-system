@@ -64,11 +64,11 @@ from datetime import datetime, timezone
 # --------------------------------------------------------------------------- #
 # The blend has three weights (summing to 1). Edit W_PP and W_ELO; W_OTR is
 # derived. PP = raw mechanical performance, ELO = live matchmaking rating, OTR =
-# tournament rating. Defaults lean on the two "competitive" axes a touch more
-# than raw pp, but all three are easily tunable (the split is openly debatable).
-W_PP = 0.30          # weight on pp performance (0..1)
-W_ELO = 0.35         # weight on elo (ranked-play) rating (0..1)
-W_OTR = 1.0 - W_PP - W_ELO  # weight on OTR tournament rating -- derived (0.35)
+# tournament rating. Defaults weight the three axes near-equally (a hair more on
+# Elo), and all three remain easily tunable (the split is openly debatable).
+W_PP = 0.33          # weight on pp performance (0..1)
+W_ELO = 0.34         # weight on elo (ranked-play) rating (0..1)
+W_OTR = 1.0 - W_PP - W_ELO  # weight on OTR tournament rating -- derived (0.33)
 TOP_N = 1000         # how many anchor players to pull
 MODE = "osu"         # ruleset: osu | taiko | fruits | mania
 PER_PAGE = 50        # osu rankings pages return 50 users each
