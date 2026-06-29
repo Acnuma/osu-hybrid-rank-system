@@ -72,7 +72,14 @@
      window changes constantly; under the default `auto` layout that made columns
      re-fit (jiggle) on every scroll. Widths are sized for each column's widest
      possible value (e.g. the "vs pp" delta can reach ▴ +89,504). */
-  table { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; table-layout: fixed; }
+  table {
+    width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums;
+    table-layout: fixed;
+    /* The 9 fixed columns (colgroup below) need ~920px. On screens narrower than
+       that, hold this width and let the page scroll sideways instead of squeezing
+       the flexible Player column to zero (which made cells overlap on mobile). */
+    min-width: 920px;
+  }
   thead th {
     position: sticky; top: 0; background: var(--bg); z-index: 1;
     text-align: right; padding: 10px 12px; font-size: 12px; letter-spacing: .04em;
