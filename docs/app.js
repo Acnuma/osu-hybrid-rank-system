@@ -11,11 +11,11 @@ const CSV_URL = "hybrid_leaderboard.csv";
 const META_URL = "hybrid_leaderboard.meta.json";
 
 // Default weights, used only if the meta sidecar is missing them.
-const DEFAULT_WEIGHTS = { pp: 0.33, elo: 0.34, otr: 0.33 };
+const DEFAULT_WEIGHTS = { pp: 1 / 3, elo: 1 / 3, otr: 1 / 3 };
 
 // column key -> numeric? Order here is irrelevant; the <thead> drives layout.
 const NUMERIC = new Set([
-  "hybrid_rank", "pp_rank", "pp", "elo_rank", "elo_rating", "elo_raw",
+  "hybrid_rank", "pp_rank", "pp", "elo_rank", "elo_rating",
   "otr_rank", "otr_rating", "tournaments_played", "matches_played", "plays",
   "hybrid_score",
   "elo_delta",  // derived (elo_rank - hybrid_rank); null when Elo is seeded
@@ -37,8 +37,9 @@ let drawPending = false;             // coalesces scroll/resize redraws to one p
 // fast) scrolling just moves rows already in the DOM -- the compositor keeps up on
 // its own -- and we touch the DOM only when the buffer needs re-centering.
 let renderedStart = -1, renderedEnd = -1;  // index range currently in the DOM
-const BUFFER_SCREENS = 2;            // viewports of rows rendered past the viewport, each side
+const BUFFER_SCREENS = 2;            // viewports of REAL rows rendered past the viewport, each side
 const MARGIN_SCREENS = 0.75;         // re-center once the viewport gets this near a rendered edge
+const PLACEHOLDER_SCREENS = 6;       // viewports of cheap skeleton rows wrapping the real band, each side
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -66,7 +67,6 @@ function parseCSV(text) {
     obj.provisional = obj.provisional === "yes";
     obj.otr_estimated = obj.otr_estimated === "yes";
     obj.elo_estimated = obj.elo_estimated === "yes";
-    obj.elo_shrunk = obj.elo_shrunk === "yes";
     out[i - 1] = obj;
   }
   return out;
@@ -107,18 +107,17 @@ function rowHTML(r) {
       : "View tournament profile on otr.stagec.net";
     otrCell = `<a class="user" href="https://otr.stagec.net/players/${r.user_id}" target="_blank" rel="noopener" title="${title}">${fmt("otr_rating", r.otr_rating)}</a>`;
   }
-  // Shrinkage applies to EVERY real Elo (continuously), so a per-row "shrunk"
-  // symbol would just be threshold noise. Instead the Elo NUMBER itself is the
-  // hover target: mousing over it reveals the raw rating + match count. Only the
-  // genuinely categorical states keep a visible mark — `*` provisional (osu!'s own
-  // "not yet stable" flag) and `^` seeded (no real Elo at all; a PP estimate).
+  // The Elo value is osu!'s own Ranked-Play posterior, shown as-is (never edited). Its
+  // WEIGHT in the score scales with match count instead (a thin Elo leans on PP/OTR),
+  // so the number itself is the hover target: it reveals the match count backing it.
+  // `^` marks a seeded Elo (no real ranked play — a PP estimate, zero weight); `*` is
+  // osu!'s own "provisional / not yet stable" flag.
   let eloCell;
   if (r.elo_estimated) {
-    eloCell = `<abbr class="prov" title="Estimated from PP (never queued ranked play). Excluded from the score — shown for context only.">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
+    eloCell = `<abbr class="prov" title="Estimated from PP (never queued ranked play). Zero weight in its own score — shown for context only.">${fmt("elo_rating", r.elo_rating)}^</abbr>`;
   } else {
-    const rawTxt = Number.isNaN(r.elo_raw) ? "?" : r.elo_raw.toLocaleString("en-US");
     const matches = `${r.plays} ranked ${r.plays === 1 ? "match" : "matches"}`;
-    const title = `Ranked Play Elo, sample-size adjusted toward its PP estimate. Raw Elo ${rawTxt} over ${matches}.`;
+    const title = `osu! Ranked Play rating (an OpenSkill posterior seeded from PP). Used at its own value; its weight in the score scales with match count, so a thin record leans more on PP/OTR. Backed by ${matches}.`;
     eloCell = `<abbr class="elo-num" title="${title}">${fmt("elo_rating", r.elo_rating)}</abbr>${r.provisional ? prov : ""}`;
   }
   return (
@@ -228,23 +227,36 @@ function drawWindow(force) {
   const safeBelow = renderedEnd - visEnd >= margin || renderedEnd === n;
   if (!force && renderedStart >= 0 && safeAbove && safeBelow) return;
 
-  // Rebuild: materialize the visible band plus BUFFER_SCREENS of runway each side.
+  // Rebuild: a band of REAL rows (visible + BUFFER_SCREENS of runway each side)
+  // wrapped in a wider band of cheap SKELETON rows. A fast fling can outrun the real
+  // band before the next rebuild lands; the skeletons (same height, ~2 nodes each)
+  // mean the viewport shows shimmering placeholders instead of blank spacer until
+  // the real rows catch up on the following frame.
   const buffer = screen * BUFFER_SCREENS;
   const start = Math.max(0, visStart - buffer);
   const end = Math.min(n, visEnd + buffer);
   renderedStart = start; renderedEnd = end;
 
-  // Spacers carry the off-screen height; topPad + rendered + botPad == n·ROW_H.
+  const pad = screen * PLACEHOLDER_SCREENS;
+  const skelStart = Math.max(0, start - pad);
+  const skelEnd = Math.min(n, end + pad);
+
+  // Spacers carry the height outside the skeleton band; spacers + skeletons + real
+  // rows sum to n·ROW_H so the scrollbar still spans the whole list.
   const spacer = (h) =>
     `<tr class="spacer" aria-hidden="true"><td colspan="9" style="padding:0;border:0;height:${h}px"></td></tr>`;
-  let html = start > 0 ? spacer(start * ROW_H) : "";
+  const skel =
+    `<tr class="skel" aria-hidden="true"><td colspan="9" style="height:${ROW_H}px;padding:0"><span class="skel-bar"></span></td></tr>`;
+  let html = skelStart > 0 ? spacer(skelStart * ROW_H) : "";
+  for (let i = skelStart; i < start; i++) html += skel;
   for (let i = start; i < end; i++) html += rowHTML(VIEW[i]);
-  if (end < n) html += spacer((n - end) * ROW_H);
+  for (let i = end; i < skelEnd; i++) html += skel;
+  if (skelEnd < n) html += spacer((n - skelEnd) * ROW_H);
   body.innerHTML = html;
 
   // Calibrate ROW_H from a real rendered row; if it differs from the estimate,
   // invalidate and redraw once with the true height (it then converges, no loop).
-  const sample = body.querySelector("tr:not(.spacer)");
+  const sample = body.querySelector("tr:not(.spacer):not(.skel)");
   if (sample) {
     const h = sample.offsetHeight;
     if (h && Math.abs(h - ROW_H) > 0.5) {

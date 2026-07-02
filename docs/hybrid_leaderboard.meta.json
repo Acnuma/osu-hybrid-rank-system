@@ -1,11 +1,12 @@
 {
-  "generated_utc": "2026-06-29T17:47:48Z",
+  "generated_utc": "2026-07-02T01:54:59Z",
   "players": 10000,
   "mode": "osu",
-  "weight_pp": 0.33,
-  "weight_elo": 0.34,
-  "weight_otr": 0.33,
-  "reliability_weighting": "seeded axes (estimated elo/otr) get zero weight; a real OTR is tapered by matches/(matches+k_otr); freed weight redistributed to the player's other real axes",
+  "weight_pp": 0.3333,
+  "weight_elo": 0.3333,
+  "weight_otr": 0.3333,
+  "reliability_weighting": "seeded axes (estimated elo/otr) get zero weight; each real axis is tapered by its evidence count (elo by plays/(plays+k_elo), otr by matches/(matches+k_otr)); freed weight redistributed to the player's other real axes",
+  "elo_reliability_k": 5.0,
   "otr_reliability_k": 5.0,
   "norm": {
     "pp": {
@@ -14,8 +15,8 @@
       "log": true
     },
     "elo": {
-      "mean": 1791.084867,
-      "std": 100.809205,
+      "mean": 1780.755749,
+      "std": 111.442501,
       "log": false
     },
     "otr": {
@@ -24,11 +25,10 @@
       "log": false
     }
   },
-  "otr_real": 6668,
-  "otr_estimated": 3332,
-  "elo_real": 6207,
-  "elo_estimated": 3793,
-  "elo_shrunk": 4135,
+  "otr_real": 6644,
+  "otr_estimated": 3356,
+  "elo_real": 6222,
+  "elo_estimated": 3778,
   "min_plays": 1,
   "exclude_provisional": false,
   "top_k": 10000,
@@ -38,10 +38,9 @@
   "otr_rank_cap": 10000,
   "rp_scan_pages": 200,
   "otr_recruited": 4286,
-  "otr_recruited_on_board": 1390,
+  "otr_recruited_on_board": 1375,
   "elo_prior": {
     "intercept": -1199.761013,
-    "slope": 328.642077,
-    "k": 5.0
+    "slope": 328.642077
   }
 }
