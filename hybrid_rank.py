@@ -7,7 +7,9 @@ common, normalized scale -- so it measures *magnitude*, not just ordinal place:
 
   * PP performance    -> osu.ppy.sh/rankings/{mode}/global        (raw pp value)
   * Elo rating        -> osu.ppy.sh/rankings/ranked-play/{mode}/{pool}
-                         (osu!'s "ranked play" matchmaking rating, mu)
+                         (osu!'s "ranked play" rating, mu -- an OpenSkill posterior
+                         seeded from a pp estimate; players with no real Elo get a
+                         zero-weighted pp seed)
   * OTR rating        -> osu! Tournament Rating (otr.stagec.net public API);
                          players with no tournament history get a rank-seeded
                          estimate using OTR's own initial-rating formula.
@@ -17,24 +19,27 @@ first because it's heavily right-skewed), then blended (higher is better):
 
     hybrid_score = w_pp * z_pp + w_elo * z_elo + w_otr * z_otr
 
-The weights are *reliability-weighted* per player: a **seeded** axis carries no
-independent signal -- a seeded OTR is a deterministic transform of osu! rank
-(corr ~0.995 with pp) and a seeded Elo is the PP-prior itself -- so weighting it
-like a real measurement just double-counts pp. Any seeded axis is therefore given
-**zero** weight. A *real* OTR is further tapered by how much tournament play backs
-it (weight *= matches/(matches+OTR_RELIABILITY_K)), since one or two matches barely
-move the rating off its rank-seed; a seeded OTR is just the matches=0 limit of that
-taper. Each axis's freed share is redistributed to the player's remaining real axes.
-With deep real Elo and OTR the weights are exactly the base W_PP / W_ELO / W_OTR.
+The weights are *reliability-weighted* per player. Elo and OTR are the same kind of
+object -- OpenSkill (Plackett-Luce) posteriors seeded from a prior (Elo from a pp
+estimate, OTR from osu! rank) that washes out as evidence accrues -- so both are
+treated identically: the rating VALUE is used as-is (never edited), and reliability
+lives entirely in the WEIGHT. A **seeded** axis (no real evidence -- its value is just
+the prior, which for both axes is ~pp and so adds nothing beyond the pp axis) gets
+**zero** weight. A *real* axis is tapered by its evidence count -- Elo by ranked
+matches (weight *= plays/(plays+ELO_RELIABILITY_K)), OTR by tournament matches
+(weight *= matches/(matches+OTR_RELIABILITY_K)) -- a seeded axis being just the
+evidence=0 limit of that taper, so the rule is continuous across the seed boundary.
+Each axis's freed share is redistributed to the player's remaining real axes. With
+deep real Elo and OTR the weights are exactly the base W_PP / W_ELO / W_OTR.
 
 Players are sorted *descending* by hybrid_score to produce a "hybrid rank".
 Ties break deterministically by elo rating, then pp, then user id.
 
-The default "union" anchor takes (PP top-10k) UNION (ranked-play top-10k) and keeps
-anyone with at least one real competitive rating (a real Elo OR a real OTR). Low-play
-Elos are noisy, so each Elo is *shrunk* toward the rating its pp predicts, weighted by
-match count (n/(n+K)); a player with no Elo at all is just the n=0 limit of that same
-formula (their Elo equals the pp-prior seed). See the ELO_SHRINK_K note below.
+The default "union" anchor takes (PP top-10k) UNION (ranked-play top-10k) UNION (OTR
+top-10k) and keeps anyone with at least one real competitive rating (a real Elo OR a
+real OTR). A real Elo is used at its own posterior value; a player with no real Elo
+gets a pp-seed value (zero-weighted, so it only feeds the axis's normalization, never
+that player's own blend). See the ELO_RELIABILITY_K note below.
 
 Pure standard library -- no pip installs required.
 """
@@ -64,11 +69,11 @@ from datetime import datetime, timezone
 # --------------------------------------------------------------------------- #
 # The blend has three weights (summing to 1). Edit W_PP and W_ELO; W_OTR is
 # derived. PP = raw mechanical performance, ELO = live matchmaking rating, OTR =
-# tournament rating. Defaults weight the three axes near-equally (a hair more on
-# Elo), and all three remain easily tunable (the split is openly debatable).
-W_PP = 0.33          # weight on pp performance (0..1)
-W_ELO = 0.34         # weight on elo (ranked-play) rating (0..1)
-W_OTR = 1.0 - W_PP - W_ELO  # weight on OTR tournament rating -- derived (0.33)
+# tournament rating. Defaults weight the three axes EQUALLY (1/3 each); all three
+# remain easily tunable (the split is openly debatable).
+W_PP = 1.0 / 3.0     # weight on pp performance (0..1)
+W_ELO = 1.0 / 3.0    # weight on elo (ranked-play) rating (0..1)
+W_OTR = 1.0 - W_PP - W_ELO  # weight on OTR tournament rating -- derived (1/3)
 TOP_N = 1000         # how many anchor players to pull
 MODE = "osu"         # ruleset: osu | taiko | fruits | mania
 PER_PAGE = 50        # osu rankings pages return 50 users each
@@ -80,17 +85,21 @@ RP_RANK_CAP = 10000  # union caps the ranked-play (Elo) scan at this rank by def
                      # Elo rather than a scanned one -- prioritizes speed (a full
                      # scan is ~2,000 pages). Override depth with --rp-max-pages.
 
-# Low-play Elos are noisy, so (in the union anchor) every Elo is SHRUNK toward the
-# rating its pp predicts, weighted by sample size: elo = prior + (raw - prior)*n/(n+K),
-# where prior is a pp->elo fit on stable (>=10-match) players and n is the match
-# count. K is the shrinkage half-weight point. K=5 is derived empirically: using OTR
-# as an independent skill yardstick, a player's Elo only overtakes a pure pp guess as
-# a skill predictor at ~5 matches (below 5 they tie, r~0.56 each, Williams p=0.84;
-# at >=5 Elo pulls ahead to r~0.70, Fisher z=8.3, p<1e-15). A player with NO real
-# Elo is just the n=0 limit (elo = prior). See README "Low-play Elo shrinkage".
-ELO_SHRINK_K = 5.0
-ELO_STABLE_PLAYS = 10  # only ratings with >= this many matches fit the pp->elo prior
-ELO_SHRINK_MARK = 15.0  # flag a real Elo as "shrunk" once the adjustment is >= this many points
+# osu! Ranked-Play "Elo" is an OpenSkill (Plackett-Luce) posterior SEEDED from a pp
+# estimate at account creation, then Bayesian-updated per match -- structurally the
+# same kind of object as OTR (seeded from rank). We therefore never edit its value: a
+# real Elo is used as-is, and a player with no real Elo gets a pp-seed VALUE (from the
+# prior below) that is zero-weighted. Reliability is a WEIGHT taper on the real Elo:
+# weight *= plays / (plays + ELO_RELIABILITY_K), a seeded Elo being the plays=0 limit.
+# On the published board full weight is actually the most accurate choice (raw Elo and
+# pp are complementary, so down-weighting just leans on pp, which the seed already
+# duplicates); the taper is a deliberate, conventional reliability hedge (small-sample
+# variance + a smooth ramp off the zero-weighted seed), applied symmetrically with OTR.
+# That Elo carries real, independent skill signal -- validated against OTR, growing with
+# match count -- is reproducible from the published board (no key/network):
+#   python analysis/elo_reliability.py
+ELO_RELIABILITY_K = 5.0
+ELO_STABLE_PLAYS = 10  # only ratings with >= this many matches fit the pp->elo seed prior
 
 # osu! Tournament Rating (OTR) -- public leaderboard API + initial-rating seed.
 # Real ratings come from ONE paginated sweep of the OTR leaderboard (the full
@@ -747,15 +756,13 @@ class Row:
     pp_rank: int
     pp: float                # raw pp performance value
     rp_rank: int | None      # ranked-play (elo) rank; None when the Elo is seeded
-    elo_rating: float        # elo used in scoring (shrunk toward the PP-prior; see below)
+    elo_rating: float        # Elo in scoring: a real posterior value, or a pp-seed when absent
     otr_rating: float        # OTR tournament rating (real or rank-seeded)
     otr_estimated: bool      # True == rank-seeded estimate, not a real OTR entry
     tournaments_played: int  # OTR verified tournaments (0 when estimated)
     plays: int = 0           # ranked-play match count
     provisional: bool = False  # osu!'s "rating not yet stable" flag
-    elo_raw: float | None = None  # pre-shrink osu! elo (mu); None when there is no real elo
-    elo_estimated: bool = False   # True == no real elo: elo_rating IS the PP-prior seed
-    elo_shrunk: bool = False      # True == real elo materially pulled toward the prior
+    elo_estimated: bool = False   # True == no real elo: elo_rating IS the pp-seed value
     otr_rank: int | None = None   # OTR global rank (real OTR entries only)
     matches_played: int = 0  # OTR verified matches (0 when seeded); drives the OTR reliability taper
     z_pp: float = 0.0        # standardized log(pp)
@@ -763,9 +770,9 @@ class Row:
     z_otr: float = 0.0       # standardized OTR rating
     # Effective per-player blend weights. Equal to the base W_PP/W_ELO/W_OTR for a
     # player with deep real axes, but a *seeded* axis (no real elo / no real otr --
-    # its value is just a PP-derived prior, not independent evidence) is given zero
-    # weight, and a real OTR is tapered by its match count; freed weight is
-    # redistributed to the player's other real axes. See _effective_weights.
+    # its value is just a pp-derived prior, not independent evidence) is given zero
+    # weight, and each real Elo/OTR is tapered by its own evidence count; freed weight
+    # is redistributed to the player's other real axes. See _effective_weights.
     w_pp: float = W_PP
     w_elo: float = W_ELO
     w_otr: float = W_OTR
@@ -799,18 +806,17 @@ def _standardize(values: list[float]) -> tuple[float, float]:
 def _effective_weights(r: Row) -> tuple[float, float, float]:
     """Reliability-weighted blend weights for one player, summing to 1.
 
-    A *seeded* axis is not independent evidence -- a seeded OTR is a deterministic
-    transform of osu! rank (corr ~0.995 with pp), and a seeded Elo is the PP-prior
-    itself -- so weighting it like a real measurement double-counts pp. We therefore
-    give any seeded axis **zero** weight.
+    A *seeded* axis is not independent evidence -- a seeded Elo/OTR is just the prior
+    (a pp estimate / a rank transform, both ~pp), so weighting it like a real
+    measurement double-counts pp. We therefore give any seeded axis **zero** weight.
 
-    A *real* OTR is additionally tapered by how much tournament play backs it:
-    weight *= matches / (matches + OTR_RELIABILITY_K). One or two matches barely move
-    the rating off its rank-seed (~pp), so trusting such a thin rating in full re-counts
-    pp and amplifies match-luck; the taper trusts OTR only as a real résumé accumulates.
-    A seeded OTR is just the matches=0 limit (taper 0), so the rule is continuous across
-    the seed boundary. Elo needs no weight taper of its own -- its thin-sample noise is
-    already handled upstream by shrinking the *value* toward the PP-prior (n/(n+K)).
+    Elo and OTR are the same kind of object (seeded OpenSkill posteriors), so both real
+    axes are tapered symmetrically by their own evidence count: Elo by ranked matches
+    (weight *= plays / (plays + ELO_RELIABILITY_K)), OTR by tournament matches
+    (weight *= matches / (matches + OTR_RELIABILITY_K)). A thin rating sits near its
+    ~pp seed, so trusting it in full re-counts pp and amplifies luck; the taper trusts
+    each axis only as its own evidence accumulates. A seeded axis is just the
+    evidence=0 limit (taper 0), so the rule is continuous across the seed boundary.
 
     The freed share of every zeroed/tapered axis is redistributed proportionally (the
     sum-to-1 renormalization below). PP is always real and fully weighted, so the total
@@ -818,7 +824,10 @@ def _effective_weights(r: Row) -> tuple[float, float, float]:
     OTR keeps the base weights.
     """
     w_pp = W_PP
-    w_elo = 0.0 if r.elo_estimated else W_ELO
+    if r.elo_estimated:
+        w_elo = 0.0
+    else:
+        w_elo = W_ELO * r.plays / (r.plays + ELO_RELIABILITY_K)
     if r.otr_estimated:
         w_otr = 0.0
     else:
@@ -917,9 +926,9 @@ def _assemble(cand: list[Candidate], otr_key: str | None, use_cache: bool,
             tp = mp = 0
             otr_rank = None
             estimated = True
-        # These anchors only keep players with a real Elo, so no shrink/seed here.
+        # These anchors only keep players with a real Elo, used at its posterior value.
         rows.append(Row(0, uid, name, pp_rank, pp, rp_rank, elo, otr_rating,
-                        estimated, tp, plays, prov, elo_raw=elo, otr_rank=otr_rank,
+                        estimated, tp, plays, prov, otr_rank=otr_rank,
                         matches_played=mp))
 
     rows = _apply_otr_floor(rows, filt)
@@ -1021,11 +1030,11 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
     top-10k) UNION (OTR top-10k) -- the most complete board, with each of the three
     skill axes contributing its own elite pool. A player is kept if they carry at
     least one real competitive rating (a real Elo OR a real OTR); pure-PP accounts
-    with neither are dropped (they'd collapse the blend to raw pp). Elo is then
-    handled three ways by one formula: a real Elo is SHRUNK toward its pp-predicted
-    value by n/(n+K); a player with no Elo is the n=0 limit (the pp-prior seed); the
-    rest are unchanged. OTR-recruited players (outside the pp/rp top-10k) get their
-    pp via the per-profile path -- fast when osu! API credentials are supplied.
+    with neither are dropped (they'd collapse the blend to raw pp). A real Elo is used
+    at its own posterior value; a player with no real Elo gets a pp-seed value that is
+    zero-weighted (it only feeds the axis's normalization, never that player's blend).
+    OTR-recruited players (outside the pp/rp top-10k) get their pp via the per-profile
+    path -- fast when osu! API credentials are supplied.
     Returns (rows, norm, extra_meta) where extra_meta carries the pp->elo prior.
     """
     src_pp = "API" if osu_creds else "HTML"
@@ -1094,11 +1103,11 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
             fy.append(rp[u][3])
     fit = statistics.linear_regression(fx, fy)
     prior_elo = lambda ppv: fit.intercept + fit.slope * math.log(ppv)
-    print(f"      pp->elo prior (n={len(fx)} stable): "
-          f"elo = {fit.intercept:.0f} + {fit.slope:.1f}*ln(pp), K={ELO_SHRINK_K:g}",
+    print(f"      pp->elo seed prior (n={len(fx)} stable): "
+          f"elo = {fit.intercept:.0f} + {fit.slope:.1f}*ln(pp)",
           file=sys.stderr)
 
-    print("[5/5] OTR + shrinkage + normalizing, blending, ranking ...", file=sys.stderr)
+    print("[5/5] OTR + Elo seeding + normalizing, blending, ranking ...", file=sys.stderr)
     rows: list[Row] = []
     no_pp = 0
     for u in kept:
@@ -1107,16 +1116,12 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
             no_pp += 1
             continue
         pp_rank, ppv = pr
-        mu = prior_elo(ppv)                     # pp-expected Elo (the prior)
-        if u in rp:                             # real Elo -> shrink toward the prior
-            rp_rank, plays, prov, elo_raw = rp[u]
-            w = plays / (plays + ELO_SHRINK_K)
-            elo = mu + (elo_raw - mu) * w
+        if u in rp:                             # real Elo -> use its posterior value as-is
+            rp_rank, plays, prov, elo = rp[u]
             elo_est = False
-            elo_shrunk = abs(elo - elo_raw) >= ELO_SHRINK_MARK
-        else:                                   # no Elo -> the n=0 limit (seed)
-            rp_rank, plays, prov, elo_raw = None, 0, False, None
-            elo, elo_est, elo_shrunk = mu, True, False
+        else:                                   # no real Elo -> pp-seed value (zero-weighted)
+            rp_rank, plays, prov = None, 0, False
+            elo, elo_est = prior_elo(ppv), True
         entry = otr.get(u)
         if entry:
             otr_rating = float(entry["rating"])
@@ -1128,18 +1133,16 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
             otr_rating = otr_seed_from_rank(pp_rank)
             tp, mp, otr_rank, otr_est = 0, 0, None, True
         rows.append(Row(0, u, names.get(u, str(u)), pp_rank, ppv, rp_rank, elo,
-                        otr_rating, otr_est, tp, plays, prov, elo_raw=elo_raw,
-                        elo_estimated=elo_est, elo_shrunk=elo_shrunk, otr_rank=otr_rank,
-                        matches_played=mp))
+                        otr_rating, otr_est, tp, plays, prov,
+                        elo_estimated=elo_est, otr_rank=otr_rank, matches_played=mp))
 
     rows = _apply_otr_floor(rows, filt)
     norm = normalize_and_score(rows)
     rows, trimmed = _finalize(rows, filt)
     real_otr = sum(1 for r in rows if not r.otr_estimated)
     seed_elo = sum(1 for r in rows if r.elo_estimated)
-    shrunk = sum(1 for r in rows if r.elo_shrunk)
     print(f"      ranked {len(rows)} | skipped {no_pp} (no pp) | trimmed {trimmed} "
-          f"(top-k) | {real_otr} real OTR | {seed_elo} seeded Elo | {shrunk} shrunk Elo",
+          f"(top-k) | {real_otr} real OTR | {seed_elo} seeded Elo",
           file=sys.stderr)
     on_board_recruits = sum(1 for r in rows if r.user_id in recruited)
     extra = {"anchor": "union",
@@ -1149,7 +1152,7 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
              "otr_recruited": len(recruited),
              "otr_recruited_on_board": on_board_recruits,
              "elo_prior": {"intercept": round(fit.intercept, 6),
-                           "slope": round(fit.slope, 6), "k": ELO_SHRINK_K}}
+                           "slope": round(fit.slope, 6)}}
     return rows, norm, extra
 
 
@@ -1168,7 +1171,6 @@ def _write_meta(csv_path: str, rows: list[Row], norm: dict,
     meta_path = os.path.splitext(csv_path)[0] + ".meta.json"
     otr_estimated = sum(1 for r in rows if r.otr_estimated)
     elo_estimated = sum(1 for r in rows if r.elo_estimated)
-    elo_shrunk = sum(1 for r in rows if r.elo_shrunk)
     payload = {
         "generated_utc": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "players": len(rows),
@@ -1177,20 +1179,21 @@ def _write_meta(csv_path: str, rows: list[Row], norm: dict,
         "weight_elo": round(W_ELO, 4),
         "weight_otr": round(W_OTR, 4),
         # Per-player reliability weighting: a seeded axis (estimated Elo or OTR) gets
-        # zero weight, and a real OTR is tapered by its match count
-        # (weight *= matches/(matches+otr_reliability_k)); freed weight is redistributed
-        # to the player's other real axes, so the base weights above apply only to deep
-        # all-real résumés.
-        "reliability_weighting": "seeded axes (estimated elo/otr) get zero weight; a "
-                                 "real OTR is tapered by matches/(matches+k_otr); freed "
-                                 "weight redistributed to the player's other real axes",
+        # zero weight; each real axis is tapered by its own evidence count -- Elo by
+        # plays/(plays+k_elo), OTR by matches/(matches+k_otr) -- and freed weight is
+        # redistributed to the player's other real axes, so the base weights above apply
+        # only to deep all-real records.
+        "reliability_weighting": "seeded axes (estimated elo/otr) get zero weight; each "
+                                 "real axis is tapered by its evidence count (elo by "
+                                 "plays/(plays+k_elo), otr by matches/(matches+k_otr)); "
+                                 "freed weight redistributed to the player's other real axes",
+        "elo_reliability_k": ELO_RELIABILITY_K,
         "otr_reliability_k": OTR_RELIABILITY_K,
         "norm": norm,
         "otr_real": len(rows) - otr_estimated,
         "otr_estimated": otr_estimated,
         "elo_real": len(rows) - elo_estimated,
         "elo_estimated": elo_estimated,
-        "elo_shrunk": elo_shrunk,
     }
     if filt is not None:
         payload["min_plays"] = filt.min_plays
@@ -1218,7 +1221,7 @@ def write_csv(rows: list[Row], path: str, norm: dict,
     with fh:
         w = csv.writer(fh)
         w.writerow(["hybrid_rank", "user_id", "username", "pp_rank", "pp",
-                    "elo_rank", "elo_rating", "elo_raw", "elo_estimated", "elo_shrunk",
+                    "elo_rank", "elo_rating", "elo_estimated",
                     "otr_rank", "otr_rating", "otr_estimated",
                     "tournaments_played", "matches_played", "plays", "provisional",
                     "hybrid_score"])
@@ -1226,9 +1229,7 @@ def write_csv(rows: list[Row], path: str, norm: dict,
             w.writerow([r.hybrid_rank, r.user_id, r.username, r.pp_rank,
                         f"{r.pp:.0f}",
                         "" if r.rp_rank is None else r.rp_rank, f"{r.elo_rating:.0f}",
-                        "" if r.elo_raw is None else f"{r.elo_raw:.0f}",
                         "yes" if r.elo_estimated else "",
-                        "yes" if r.elo_shrunk else "",
                         "" if r.otr_rank is None else r.otr_rank,
                         f"{r.otr_rating:.0f}", "yes" if r.otr_estimated else "",
                         r.tournaments_played, r.matches_played, r.plays,
@@ -1244,7 +1245,7 @@ def print_table(rows: list[Row], limit: int) -> None:
     for r in rows[:limit]:
         prov = "*" if r.provisional else " "
         est = "~" if r.otr_estimated else " "
-        emark = "^" if r.elo_estimated else "°" if r.elo_shrunk else " "
+        emark = "^" if r.elo_estimated else " "
         print(f"{r.hybrid_rank:>5}  {r.username[:18]:<18} {r.pp:>7.0f} "
               f"{r.elo_rating:>6.0f}{emark}{r.otr_rating:>5.0f}{est} "
               f"{r.plays:>4}{prov} {r.hybrid_score:>8.3f}")
@@ -1259,7 +1260,7 @@ def main() -> None:
                     default="union",
                     help="which board defines the player set: 'union' (default; the "
                          "union of the PP top-10k and ranked-play top-10k, with Elo "
-                         "shrinkage + seeding -- the most complete board), 'rankedplay' "
+                         "seeding + reliability weighting -- the most complete board), 'rankedplay' "
                          "(top-N ranked-play players only) or 'pp' (top-N PP players, "
                          "<=10k). union ignores --top; cap its size with --top-k.")
     ap.add_argument("-n", "--top", type=int, default=TOP_N,
@@ -1293,8 +1294,8 @@ def main() -> None:
     ap.add_argument("--min-plays", type=int, default=1, metavar="N",
                     help="(pp/rankedplay anchors only) drop players with fewer than N "
                          "ranked-play matches. Default 1 (off). The union anchor does "
-                         "NOT hard-cut on play count -- it shrinks noisy low-play Elos "
-                         "toward their pp-predicted value instead (n/(n+5)).")
+                         "NOT hard-cut on play count -- it weight-tapers a low-play Elo "
+                         "by plays/(plays+5) instead, leaning on the other axes.")
     ap.add_argument("--exclude-provisional", action="store_true",
                     help="drop players osu! flags as provisional (rating not yet "
                          "stable). Off by default: provisional players are kept "
@@ -1308,9 +1309,9 @@ def main() -> None:
                          "seeded and thin-OTR players. Applied BEFORE normalization, so "
                          "survivors are scored against this cohort. Default 0 (off).")
     ap.add_argument("--w-pp", type=float, default=W_PP, metavar="0..1",
-                    help=f"weight on pp performance (default {W_PP})")
+                    help=f"weight on pp performance (default {W_PP:.4g})")
     ap.add_argument("--w-elo", type=float, default=W_ELO, metavar="0..1",
-                    help=f"weight on elo rating (default {W_ELO}); OTR gets the "
+                    help=f"weight on elo rating (default {W_ELO:.4g}); OTR gets the "
                          "remainder, 1 - w_pp - w_elo")
     ap.add_argument("--show", type=int, default=30,
                     help="rows to print to console (default 30)")
