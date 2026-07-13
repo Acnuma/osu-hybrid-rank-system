@@ -211,6 +211,15 @@ prior = a + b·ln(pp)     # PP→Elo fit on STABLE (≥10-match) players; used o
 w_elo = W_ELO · plays / (plays + K)      # K = 5; the real Elo's weight, tapered by matches
 ```
 
+> **Source — osu!'s own matchmaking code, verified 2026-07-02.** Every claim above is
+> in [`ppy/osu-server-spectator`](https://github.com/ppy/osu-server-spectator) (`master`):
+> - *OpenSkill engine (not Elo-MMR)* — [`osu.Server.Spectator.csproj` L18](https://github.com/ppy/osu-server-spectator/blob/master/osu.Server.Spectator/osu.Server.Spectator.csproj#L18): `<PackageReference Include="OpenSkillSharp" Version="1.1.0" />`.
+> - *PP seed (the prior μ)* — [`MatchmakingQueueBackgroundService.cs` L527–538](https://github.com/ppy/osu-server-spectator/blob/master/osu.Server.Spectator/Hubs/Multiplayer/Matchmaking/Queue/MatchmakingQueueBackgroundService.cs#L527-L538): a first-time queuer's `InitialRating` **and** live `Rating` are set to `eloEstimate = -4000 + 600·ln(pp + 4000)`.
+> - *Per-match Bayesian update* — [`RankedPlayMatchController.cs` L387–439](https://github.com/ppy/osu-server-spectator/blob/master/osu.Server.Spectator/Hubs/Multiplayer/Matchmaking/RankedPlay/RankedPlayMatchController.cs#L387-L439): each ranked match feeds every player's stored μ/σ into `PlackettLuce.Rate(...)` and writes back the resulting posterior.
+>
+> These link `master`, so **line numbers may drift** and osu! may change the model — treat
+> this as osu!'s ranked-play rating **as it stood on 2026-07-02**.
+
 A real Elo is used at its reported value; a player with **no real Elo** gets the
 `prior` as a **zero-weighted** seed value (it only feeds that axis's normalization,
 never the player's own blend). Its weight ramps from ~0 at the seed up to nearly full

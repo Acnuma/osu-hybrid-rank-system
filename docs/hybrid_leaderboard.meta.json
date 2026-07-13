@@ -1,5 +1,5 @@
 {
-  "generated_utc": "2026-07-02T01:54:59Z",
+  "generated_utc": "2026-07-13T02:01:29Z",
   "players": 10000,
   "mode": "osu",
   "weight_pp": 0.3333,
@@ -10,25 +10,25 @@
   "otr_reliability_k": 5.0,
   "norm": {
     "pp": {
-      "mean": 9.114409,
-      "std": 0.279988,
+      "mean": 9.112085,
+      "std": 0.265096,
       "log": true
     },
     "elo": {
-      "mean": 1780.755749,
-      "std": 111.442501,
+      "mean": 1787.933579,
+      "std": 112.602035,
       "log": false
     },
     "otr": {
-      "mean": 1251.016523,
-      "std": 178.5837,
+      "mean": 1253.751415,
+      "std": 178.339177,
       "log": false
     }
   },
-  "otr_real": 6644,
-  "otr_estimated": 3356,
-  "elo_real": 6222,
-  "elo_estimated": 3778,
+  "otr_real": 6587,
+  "otr_estimated": 3413,
+  "elo_real": 6366,
+  "elo_estimated": 3634,
   "min_plays": 1,
   "exclude_provisional": false,
   "top_k": 10000,
@@ -37,10 +37,10 @@
   "pp_source": "api",
   "otr_rank_cap": 10000,
   "rp_scan_pages": 200,
-  "otr_recruited": 4286,
-  "otr_recruited_on_board": 1375,
+  "otr_recruited": 4246,
+  "otr_recruited_on_board": 1232,
   "elo_prior": {
-    "intercept": -1199.761013,
-    "slope": 328.642077
+    "intercept": -1369.081283,
+    "slope": 348.149638
   }
 }
