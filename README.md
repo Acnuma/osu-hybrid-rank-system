@@ -16,7 +16,7 @@ python hybrid_rank.py --anchor union --otr <key> --osu-api --out docs/hybrid_lea
 - base weights `W_PP = W_ELO = W_OTR = 1/3` (equal thirds) → `score = (z(log pp) + z(elo) + z(otr)) / 3` for all-real players; a **seeded** axis (estimated Elo/OTR) is dropped to zero weight and its share redistributed, and each **real** axis is tapered by its own evidence count — Elo by ranked matches, OTR by tournament matches ([reliability weighting](#formula))
 - mode: `osu` standard
 
-A player appears if they carry at least one **real competitive rating** — a real
+A player appears if they carry at least one **real competitive rating**: a real
 Elo (they've queued ranked play) **or** a real OTR (they've played a verified
 tournament). Pure-PP accounts with neither are dropped (they'd collapse the blend
 to raw PP). The union is ~20k players; the board scores all of them and shows the
@@ -30,7 +30,7 @@ to raw PP). The union is ~20k players; the board scores all of them and shows th
 ## Introduction
 
 Builds an osu! **hybrid global leaderboard** that blends three skill signals on a
-single, **normalized** scale — so it measures *magnitude*, not just ordinal place:
+single, **normalized** scale, so it measures *magnitude* rather than ordinal place:
 
 | Component | Source | Notes |
 |---|---|---|
@@ -56,41 +56,41 @@ normalization population is the **whole board, seeded placeholders included**: a
 seeded Elo/OTR is zero-weighted in its *own* player's blend (above) but still
 contributes to that axis's `mean`/`std`, so it helps define the scale every real
 rating is standardized against. Seeds are therefore kept in the data rather than
-blanked; dropping them would shift each axis's baseline and re-rank the board.
+blanked. Dropping them would shift each axis's baseline and re-rank the board.
 
 **Reliability weighting (per player).** The weights `w_pp/w_elo/w_otr` equal the
 base `W_PP/W_ELO/W_OTR` only when all three axes are *real*. Elo and OTR are the same
-kind of object — OpenSkill (Plackett-Luce) posteriors seeded from a prior (Elo from a
-pp estimate, OTR from osu! rank) that washes out as evidence accrues — so both are
+kind of object: OpenSkill (Plackett-Luce) posteriors seeded from a prior (Elo from a
+pp estimate, OTR from osu! rank) that washes out as evidence accrues. So both are
 handled identically: the rating **value** is used as-is (never edited) and reliability
-lives entirely in the **weight**. A **seeded** axis carries no independent signal — its
-value is just the prior, which for both axes is ≈ pp — so weighting it like a real
-measurement double-counts pp; any seeded axis is therefore given **zero** weight and
+lives entirely in the **weight**. A **seeded** axis carries no independent signal: its
+value is just the prior, which for both axes is ≈ pp, so weighting it like a real
+measurement double-counts pp. Any seeded axis is therefore given **zero** weight and
 its share is redistributed proportionally to the player's real axes (e.g. a player with
 a real Elo but a seeded OTR is scored on roughly `½·z(log pp) + ½·z(elo)`). A **real**
 axis is tapered by its own evidence count — Elo by `plays / (plays + 5)`, OTR by
 `matches / (matches + 5)` — so a thin rating (barely off its ≈ pp seed) leans on the
-other axes, while a deep one earns close to its full share; a seeded axis is just the
+other axes, while a deep one earns close to its full share. A seeded axis is just the
 evidence = 0 limit of that taper, so the rule is continuous across the seed boundary.
 Every board player has at least one real competitive axis, so the real weights never
 sum to zero.
 
-On the published board **full weight is actually the most accurate choice** for both
-axes (a real Elo/OTR and pp are complementary, so down-weighting a thin rating just
-leans on pp, which the seed already duplicates — measured against OTR, tapering only
-*lowers* agreement). The taper is therefore a deliberate, conventional reliability
-hedge — it damps small-sample luck and gives a smooth ramp off the zero-weighted seed —
-not an accuracy optimizer; `K = 5` is a shared, conservative constant, not a per-axis
+On the published board **full weight is the most accurate choice** for both
+axes: a real Elo/OTR and pp are complementary, so down-weighting a thin rating just
+leans on pp, which the seed already duplicates. Measured against OTR, tapering only
+*lowers* agreement. The taper is therefore a conventional reliability
+hedge: it damps small-sample luck and gives a smooth ramp off the zero-weighted seed,
+rather than optimizing accuracy. `K = 5` is a shared constant rather than a per-axis
 fitted threshold. Without *any* reliability handling, ~⅓ of the board (seeded-OTR
 players) effectively had pp counted ~twice, and a single match flipped a near-seed
-rating to full weight; the weighting leaves the top of the board virtually unchanged
+rating to full weight. The weighting leaves the top of the board virtually unchanged
 while correcting the seeded and thin-record mid-board.
 
 **Why not hand-pick a two-axis split?** Renormalizing the base weights is
-deliberately the *only* rule for a player missing an axis: it keeps one formula
+the *only* rule for a player missing an axis: it keeps one formula
 for every case and leaves the taper intact. Hard-coding a separate split (say
 forcing `0.4 / 0.6`) would re-open the thin-rating loophole the taper just closed,
-since a one- or two-match rating would snap back to a large fixed share; it would
+since a one- or two-match rating would snap back to a large fixed share. It would
 also lean *harder* on a lone competitive axis that, having no second axis to
 corroborate it, warrants more caution, not less.
 
@@ -103,27 +103,27 @@ The **anchor** decides which board defines the player set:
   the three skill axes contributes its own elite pool, so a player strong on *any*
   one of them is surfaced (the OTR pool adds tournament players who don't grind PP
   or queue ranked play). A player is kept if they carry at least one *real*
-  competitive rating (a real Elo **or** a real OTR); pure-PP accounts with neither
+  competitive rating (a real Elo **or** a real OTR). Pure-PP accounts with neither
   are dropped. Every kept player then gets all three axes: PP from the bulk board
   or a per-player lookup (fast via `--osu-api`, else a per-profile HTML fetch), Elo
-  used at its own posterior value (or a zero-weighted PP-seed when absent — see
+  used at its own posterior value (or a zero-weighted PP-seed when absent, see
   below), and OTR (real or rank-seeded). The full union (~20k) is scored, then the best
   **10,000** are shown (override with `--top-k`). `--top` is ignored in this mode.
 - **`--anchor rankedplay`** — take the top-N **ranked-play** players, then look up
   each one's pp value (bulk PP board, else a **per-profile** fetch of
   `statistics.global_rank` + `statistics.pp`). Players with **no pp value** are
-  skipped. No seeding; obeys `--min-plays`.
+  skipped. No seeding. Obeys `--min-plays`.
 - **`--anchor pp`** — take the top-N **PP** players (hard-capped at 10k, see
   below), blend in elo rating from the bulk ranked-play board. Players with **no
-  elo rating** are skipped. No seeding; obeys `--min-plays`.
+  elo rating** are skipped. No seeding. Obeys `--min-plays`.
 
 The `rankedplay`/`pp` anchors are simpler, single-pool boards retained for
-comparison; the **union** anchor is what the published site uses.
+comparison. The **union** anchor is what the published site uses.
 
 ### OTR tournament rating (`--otr`)
 
 The third axis is **OTR** (osu! Tournament Rating), an OpenSkill / Plackett-Luce
-rating built from verified tournament results — a real measure of tournament
+rating built from verified tournament results, a real measure of tournament
 performance, replacing the old badge-count heuristic.
 
 ```
@@ -135,15 +135,15 @@ performance, replacing the old badge-count heuristic.
 **Getting a key:** sign in at [otr.stagec.net](https://otr.stagec.net) with your
 osu! account and create an API key (up to 3). Pass it as `--otr <key>` or export
 it as `OTR_API_KEY` and use a bare `--otr`. **The key is sent only as a Bearer
-header and is never written to disk or the CSV — keep it out of git.**
+header and is never written to disk or the CSV. Keep it out of git.**
 
 Real ratings come from a single paginated sweep of the public **OTR leaderboard**
 (`GET /api/leaderboard`, ~267 pages / ~27k players), joined to our players by osu!
-id — a fixed cost regardless of board size. The sweep is cached for 1 week; the OTR
+id, a fixed cost regardless of board size. The sweep is cached for 1 week. The OTR
 API shares one rate limit across endpoints, so it is paced and self-heals on 429.
 
 **Coverage & the rank-seeded fallback.** OTR only rates players who have competed
-in verified tournaments — about **two-thirds** of this board (the rest of osu! has
+in verified tournaments, about **two-thirds** of this board (the rest of osu! has
 none). Everyone else gets an OTR rating **seeded from their osu! rank** using OTR's
 own initial-rating formula (`otr-processor`'s `mu_from_rank`, osu! ruleset):
 
@@ -172,16 +172,16 @@ of HTML scraping:
    `statistics_rulesets` (`global_rank` + `pp`) — turning ~10k profile scrapes into
    ~200 calls. Note: the osu! API throttle is **1,200 cost-units/min** and `/users`
    charges **one unit per id** (a 50-id call costs 50), so these calls are paced to
-   ~2.7 s apart (`OSU_USERS_MIN_INTERVAL`) to stay under budget — ~10 min for the
-   full ~10k, still far better than hours of HTML scraping.
+   ~2.7 s apart (`OSU_USERS_MIN_INTERVAL`) to stay under budget (~10 min for the
+   full ~10k), still far better than hours of HTML scraping.
 
 ```
 --osu-api       # PP board + pp lookups via the osu! API; needs OSU_CLIENT_ID + OSU_CLIENT_SECRET
 (omitted)       # falls back to HTML scraping (bulk pp pages + one profile per recruit; slow, no key)
 ```
 
-(The ranked-play **Elo** board has no API equivalent — its matchmaking rating isn't
-exposed anywhere in the osu! API — so it is always HTML-scraped.)
+(The ranked-play **Elo** board has no API equivalent: its matchmaking rating isn't
+exposed anywhere in the osu! API, so it is always HTML-scraped.)
 
 **Getting credentials:** at [osu.ppy.sh/home/account/edit](https://osu.ppy.sh/home/account/edit)
 → **OAuth** → *New OAuth Application* (callback URL can be blank). Export the pair:
@@ -192,17 +192,17 @@ exposed anywhere in the osu! API — so it is always HTML-scraped.)
 ```
 
 A `client_credentials` ("guest") token with `scope=public` is fetched at runtime.
-**The secret is read from the environment only — never written to disk, the CSV,
+**The secret is read from the environment only: never written to disk, the CSV,
 or git, and never logged (only its length is printed).** Cached pp values are
 shared with the HTML path, so the two are interchangeable.
 
 ### Reliability weighting (Elo & OTR)
 
-osu!'s Ranked-Play "Elo" is not a raw number to be corrected — it is an **OpenSkill
+osu!'s Ranked-Play "Elo" is not a raw number waiting to be corrected. It is an **OpenSkill
 (Plackett-Luce) posterior seeded from a PP estimate** at account creation, then
 Bayesian-updated per match. So a low-match Elo already sits near its PP seed and drifts
-to the player's own level as games accrue — structurally the same object as OTR (seeded
-from rank). The **union** anchor therefore does not shrink or discard it; it **uses the
+to the player's own level as games accrue, the same kind of object as OTR (seeded
+from rank). The **union** anchor therefore does not shrink or discard it. It **uses the
 Elo at its own posterior value** and puts all the reliability handling in the *weight*:
 
 ```
@@ -220,62 +220,62 @@ w_elo = W_ELO · plays / (plays + K)      # K = 5; the real Elo's weight, tapere
 > These link `master`, so **line numbers may drift** and osu! may change the model — treat
 > this as osu!'s ranked-play rating **as it stood on 2026-07-02**.
 
-A real Elo is used at its reported value; a player with **no real Elo** gets the
+A real Elo is used at its reported value. A player with **no real Elo** gets the
 `prior` as a **zero-weighted** seed value (it only feeds that axis's normalization,
 never the player's own blend). Its weight ramps from ~0 at the seed up to nearly full
 as matches accrue, so one rule covers all cases: real-and-deep, real-but-thin, and
-absent. CSV flag: `elo_estimated=yes` (no real Elo; the value is the seed). The seed
-prior's coefficients live in the meta sidecar (`elo_prior`); the taper constant is
+absent. CSV flag: `elo_estimated=yes` (no real Elo, the value is the seed). The seed
+prior's coefficients live in the meta sidecar (`elo_prior`), and the taper constant is
 `elo_reliability_k`.
 
-**Does Elo carry real skill signal — and why K = 5?** Using **OTR as an independent
+**Does Elo carry real skill signal, and why K = 5?** Using **OTR as an independent
 yardstick** (it shares no data with Ranked Play or PP), on the players who carry both a
 real Elo and a real OTR:
 
 - A real Elo's agreement with OTR **climbs with match count**: a thin Elo (1–4 matches)
-  predicts OTR **no better than a pure PP guess** — a statistical dead heat (Williams
-  test nowhere near significant) — but by **≥5 matches** it pulls clearly ahead (the
+  predicts OTR **no better than a pure PP guess** (a statistical dead heat, with the
+  Williams test nowhere near significant), but by **≥5 matches** it pulls clearly ahead (the
   Elo↔OTR correlation rises from about **0.5** to about **0.7**, Fisher `p < 10⁻¹⁰`).
   So Elo earns its place as an independent axis.
-- But `K = 5` is a **conventional reliability constant, not a fitted threshold.** In the
+- But `K = 5` is a **conventional reliability constant rather than a fitted threshold.** In the
   actual 3-axis blend, **full weight is the most accurate choice**: a real Elo and PP
-  are complementary, so down-weighting a thin Elo just leans on PP — which the seed
-  already duplicates — and grid-searching the *weight* taper to best predict OTR peaks
+  are complementary, so down-weighting a thin Elo just leans on PP (which the seed
+  already duplicates), and grid-searching the *weight* taper to best predict OTR peaks
   at `K → 0` (no taper), declining monotonically as `K` grows. The taper is a
-  deliberate, conservative hedge (small-sample luck + a smooth ramp off the
-  zero-weighted seed), costing a hair of aggregate accuracy by design.
+  conventional hedge (small-sample luck plus a smooth ramp off the
+  zero-weighted seed), costing a hair of aggregate accuracy by choice.
 
-**Reproduce it yourself** — no OTR key or network needed:
+**Reproduce it yourself** (no OTR key or network needed):
 
 ```
 python analysis/elo_reliability.py
 ```
 
 This recomputes the bucketed Elo↔OTR correlations, the Williams/Fisher tests and the `K`
-grid search from a **frozen, timestamped snapshot** in `analysis/snapshots/` — *not* the
-live `docs/` board, which is overwritten on every weekly refresh — so the proof always
+grid search from a **frozen, timestamped snapshot** in `analysis/snapshots/` rather than the
+live `docs/` board (which is overwritten on every weekly refresh), so the proof always
 reproduces the exact dataset it was written against. Figures shift slightly between
-snapshots; the qualitative result (Elo's signal grows with matches) is stable. After a
+snapshots, but the qualitative result (Elo's signal grows with matches) is stable. After a
 refresh you can freeze a fresh
 snapshot by copying `docs/hybrid_leaderboard.csv` and its `.meta.json` into
 `analysis/snapshots/` with the generation date in the filename (the script then picks
 the newest automatically).
 
-**Elo and OTR are treated identically — because they are the same kind of thing.** Both
+**Elo and OTR are treated identically, because they are the same kind of thing.** Both
 are OpenSkill posteriors seeded from a prior (Elo from PP, OTR from rank) that washes out
 with evidence, so neither rating's **value** is ever edited and all reliability handling
 lives in the **weight**: a thin rating keeps its exact number but *counts for less* — Elo
 by `plays/(plays+5)`, OTR by `matches/(matches+5)` — until enough play backs it. There is
 no "raw Elo vs Bayesian OTR" asymmetry to justify, because *both* are already Bayesian,
-seeded posteriors. The one honesty note: `5` is a shared, conventional constant, not a
-per-axis fitted value — the accuracy-optimal weight is close to *full* for both, and
-there is no non-circular way to fit a separate reliability point per axis — so
-`evidence/(evidence+5)` is a principled, conservative default, not a measured threshold.
+seeded posteriors. One caveat: `5` is a shared, conventional constant rather than a
+per-axis fitted value. The accuracy-optimal weight is close to *full* for both, and
+there is no non-circular way to fit a separate reliability point per axis, so
+`evidence/(evidence+5)` is a reasonable, cautious default rather than a measured threshold.
 
 > **Open question.** On the current snapshot OTR's own rank-seed out-predicts a *raw
 > thin* OTR out to ~20+ tournament matches, so in isolation OTR's reliability half-point
-> looks far higher than 5. In the blend that is a red herring — the seed ≈ PP (already an
-> axis), so what the OTR axis uniquely adds is its raw value at near-full weight — which
+> looks far higher than 5. In the blend that is a red herring: the seed ≈ PP (already an
+> axis), so what the OTR axis uniquely adds is its raw value at near-full weight, which
 > is why `K_OTR = 5` is retained. Whether OTR deserves a heavier taper than Elo is left
 > as a separate, unresolved tuning question.
 
@@ -312,7 +312,7 @@ python hybrid_rank.py --show 50                                  # print more ro
 ```
 
 `--offline` reuses any cached file regardless of age and never hits the network
-(errors if something needed isn't cached) — so changing the weights or the score
+(errors if something needed isn't cached), so changing the weights or the score
 formula re-ranks in seconds instead of re-scraping. The normal cache TTL is 1 week.
 (Real OTR ratings still require a network fetch the first time; once cached they
 recompute offline too.)
@@ -321,10 +321,10 @@ Union-mode cost (cold), all three axes capped at **top-10k**: ~200 ranked-play
 pages (RP top-10k) + 200 PP pages + a pp lookup per kept player **outside** the PP
 top-10k (~10k, incl. OTR recruits) + the ~267-page OTR sweep. With `--osu-api` the
 PP board and the pp lookups both use the osu! API (the lookups batched 50-at-a-time
-→ ~200 calls); without it both are HTML-scraped. At the polite **1 request/second**
-cap (osu! & OTR both ask for ≤60/min) — plus the `/users` calls paced to ~2.7 s for
-the osu! API cost budget — that's roughly **~15–20 min** cold. Re-runs are
-near-instant from cache; weight/formula tweaks use `--offline`.
+→ ~200 calls). Without it both are HTML-scraped. At the polite **1 request/second**
+cap (osu! & OTR both ask for ≤60/min), plus the `/users` calls paced to ~2.7 s for
+the osu! API cost budget, that's roughly **~15–20 min** cold. Re-runs are
+near-instant from cache, and weight/formula tweaks use `--offline`.
 
 > **Speed vs. completeness.** The RP scan is capped at RP top-10k by default
 > (`RP_RANK_CAP`); a player ranked beyond that gets a *seeded* Elo instead of their
@@ -337,7 +337,7 @@ otr_rating, otr_estimated, tournaments_played, matches_played, plays, provisiona
 hybrid_score`. `elo_rating` is the player's own Ranked-Play posterior (its value is
 used as-is); when a player has no real Elo it holds the zero-weighted PP-seed and
 `elo_estimated=yes` (and `elo_rank` is blank). `plays` is the ranked-match count that
-sets the Elo reliability weight; `matches_played` is the verified OTR match count
+sets the Elo reliability weight. `matches_played` is the verified OTR match count
 (0 when seeded) that sets the OTR reliability weight. The `*_estimated`/`provisional`
 flags are `yes` or blank. A sidecar `<name>.meta.json` records the generation time, the
 three weights, the per-axis normalization params, the reliability constants
@@ -345,35 +345,35 @@ three weights, the per-axis normalization params, the reliability constants
 Elo seed prior (`elo_prior`), the anchor, and the active filters. If the CSV is open in
 Excel a numbered sibling is written.
 
-### Reading the deltas: a big `vs pp` jump is signal, not noise
+### Reading the deltas: what a big `vs pp` jump means
 
 The three **delta** columns (`vs pp`, `vs elo`, `vs otr`) show how many places a
 player's hybrid rank beats (green ▴) or trails (red ▾) that one axis's rank alone. A
-large `vs pp` value can look alarming — **+100,000 or more** — but it is the board
-working as designed, not a low-confidence artifact.
+large `vs pp` value can look alarming (**+100,000 or more**), but it is the board
+working as designed rather than a low-confidence artifact.
 
 Because the **union anchor** recruits players by their *competitive* standing (the
 ranked-play/Elo top-10k and the OTR leaderboard), a strong tournament or matchmaking
 player who simply doesn't farm PP is pulled onto the board despite a PP rank in the six
-figures. Their `vs pp` is then enormous — and that gap *is* the signal: PP badly
+figures. Their `vs pp` is then enormous, and that gap *is* the signal: PP badly
 understates them, which is the whole reason the board exists.
 
-Crucially, **the biggest jumps belong to the most-confident competitive players, not the
+**The biggest jumps belong to the most-confident competitive players, not the
 tail.** The largest `vs pp` values consistently come from players with a *deep* verified
-tournament record — dozens of OTR matches — rather than thin, single-axis entries. They
+tournament record (dozens of OTR matches) rather than thin, single-axis entries. They
 need no special protection: even a strict tournament-match floor that drops most of the
-board still keeps these top jumps. The genuinely low-confidence players — a single thin
-axis, two or three matches — sit near the **bottom** of the board with *much smaller*
+board still keeps these top jumps. The low-confidence players (a single thin
+axis, two or three matches) sit near the **bottom** of the board with *much smaller*
 deltas, since a thin axis is down-weighted and their score leans on PP.
 
-So read a large `vs pp` as "PP badly understates this player," not as an error; trimming
-those rows away would delete the board's most distinctive output. If you specifically want
-a board without the low-PP tournament crowd, that is exactly what `--min-otr-matches` is
+So read a large `vs pp` as "PP badly understates this player," not as an error. Trimming
+those rows away would delete the board's most distinctive output. If you want
+a board without the low-PP tournament crowd, that is what `--min-otr-matches` is
 for.
 
 ### Website (GitHub Pages)
 
-The repo ships a dependency-free static site in [`docs/`](docs/) — an
+The repo ships a dependency-free static site in [`docs/`](docs/): an
 `index.html` + `app.js` that fetch the committed CSV and render a **searchable,
 sortable** table (search by username, click any column header to sort). Three
 **delta** columns show how a player's hybrid rank compares to each axis alone:
@@ -383,7 +383,7 @@ its match count (its value shown as-is), so rather than a per-row symbol the **E
 number is itself a hover target** (shows the match count behind it). Only the
 categorical states carry a mark: **`*`** provisional (osu!'s own flag) and **`^`** no
 real Elo (the value is the PP seed). OTR estimates from rank are marked **`~`**. A second **Calculator** tab computes a hybrid score
-from a raw PP, Elo, and OTR — it pulls the published board's per-axis mean/std from the
+from a raw PP, Elo, and OTR. It pulls the published board's per-axis mean/std from the
 meta sidecar, so with the default weights it reproduces exactly what the board
 computed. The three weights are pre-filled with the board's split but **editable**,
 so you can see how a different PP/Elo/OTR balance would score a player (with a
@@ -393,7 +393,7 @@ one-click reset back to the board weights).
 branch* → branch `main`, folder `/docs`. The board goes live at
 `https://<user>.github.io/<repo>/`.
 
-**Refresh the published data** (manual — you control the scrape rate):
+**Refresh the published data** (manual, you control the scrape rate):
 
 ```
 python hybrid_rank.py --anchor union --otr <key> --osu-api --out docs/hybrid_leaderboard.csv  # ~15 min first time (10k caps)
@@ -407,14 +407,14 @@ the repo.
 
 ### Hard cap: top 10,000
 
-osu!'s **public PP leaderboard is capped at the top 10,000** (page 200); deeper
-pages just repeat page 200. The **union** anchor draws from three 10k pools — the
-PP top-10k, the ranked-play top-10k, **and the OTR top-10k** — so a player must sit
+osu!'s **public PP leaderboard is capped at the top 10,000** (page 200). Deeper
+pages just repeat page 200. The **union** anchor draws from three 10k pools (the
+PP top-10k, the ranked-play top-10k, **and the OTR top-10k**), so a player must sit
 inside at least one of the three to be considered (PP for a player outside the bulk
 board is then fetched via the osu! API batch endpoint with `--osu-api`, else
 per-profile via `statistics.global_rank` / `statistics.pp`). A player ranked
 outside **all three** pools never appears, even if their hybrid score would place
-them — so every hybrid rank is a standing *within this union sample*, not a true
+them, so every hybrid rank is a standing *within this union sample* rather than a true
 global one. (Adding the OTR pool closes the old blind spot where a tournament-only
 player who didn't grind PP or queue ranked play couldn't appear at all.)
 
@@ -425,9 +425,9 @@ player who didn't grind PP or queue ranked play couldn't appear at all.)
   lookups and serves the PP board from the rankings API; else both are HTML) + the
   ~267-page OTR sweep. `RP_RANK_CAP` / `OTR_RANK_CAP` / `PP_RANK_CAP` set the caps;
   `--rp-max-pages` scans the RP board deeper at the cost of time.
-- `MIN_INTERVAL` (default **1.0 s** — the global minimum seconds between request
+- `MIN_INTERVAL` (default **1.0 s**, the global minimum seconds between request
   *starts*) caps the whole app at **≤60 requests/min**, honoring both the osu! and
-  OTR terms of use (~1 req/s). `CONCURRENCY` (default 5) only overlaps latency; the
+  OTR terms of use (~1 req/s). `CONCURRENCY` (default 5) only overlaps latency. The
   shared throttle still paces starts to `MIN_INTERVAL`, so the rate never exceeds
   1/s. Both are at the top of the script.
 - Pages are cached under `.cache/` for 1 week, so re-runs are near-instant.
@@ -436,88 +436,10 @@ player who didn't grind PP or queue ranked play couldn't appear at all.)
 - Pure standard library — no `pip install`.
 - Tune the weights **`W_PP`** and **`W_ELO`** (`W_OTR = 1 - W_PP - W_ELO` is
   derived), the reliability constants **`ELO_RELIABILITY_K`** / **`OTR_RELIABILITY_K`**,
-  plus `MODE` at the top of `hybrid_rank.py` — or pass `--w-pp` / `--w-elo` on the
+  plus `MODE` at the top of `hybrid_rank.py`, or pass `--w-pp` / `--w-elo` on the
   command line.
 - The OTR rating model + constants are documented inline where `otr_seed_from_rank`
-  / `fetch_otr_leaderboard` are defined; they mirror `osu-tournament-rating/otr-processor`.
-
----
-
-## Limitations
-
-### Biggest limitations
-
-- **Elo is still inaccurate because too few players queue.** For Elo to be
-  meaningful, players — especially those at the top — need to play ranked
-  matches relatively frequently. (This assumes the Elo system itself is reliable
-  — it is brand new and still under active development.) The low-play reliability
-  weighting softens this, but it cannot manufacture data that isn't there.
-- **The pools it draws from stop at 10,000.** The board is the union of the PP
-  top-10k, the Ranked Play top-10k, and the OTR top-10k — each leaderboard is
-  capped at 10k — so a player outside *all three* never appears even if their
-  hybrid score would place them. Every hybrid rank is a standing *within this union
-  sample* rather than a true global one. (The OTR pool now covers tournament-only
-  players, but OTR itself rates only ~27k players total, so its bar is far looser
-  than the PP top-10k — a known asymmetry in how selective each pool is.)
-- **Thin ratings lean on PP, which can under-sell a genuine over-performer.**
-  Down-weighting a low-match Elo (or OTR) shifts a player's score toward the axes that
-  *are* well-backed — chiefly PP. So someone far better in matches than their PP
-  suggests, with only a handful of games, is scored more conservatively than they
-  deserve until they rack up play. Full weight would rank them more accurately on
-  average, but at the cost of trusting genuine flukes; the reliability taper is the
-  deliberately conservative choice. (It also relies on the PP-seed for players with no
-  real Elo, and that PP→Elo fit is loose — R² ≈ 0.35 — so a seeded Elo is only a rough
-  prior, which is exactly why it is zero-weighted.)
-- **About a third of this board's OTR ratings are estimates, not real ones.**
-  [OTR](https://otr.stagec.net/leaderboard) only rates players who have competed in
-  verified tournaments — about two-thirds of the board. Everyone else gets a rating
-  *seeded from their osu! rank* (marked `~`), which is just OTR's starting prior,
-  not evidence of actual tournament results. These seeded values are **kept out of a player's own weighted blend** (zero weight — see [reliability weighting](#formula)) precisely because
-  they'd otherwise just re-count pp; they're still shown for context and still feed the per-axis
-  normalization (each axis's mean/std is computed over the full board, seeds
-  included), so they aren't idle: the zero weight applies only to their own
-  player's blend. A *real* OTR backed by only a
-  handful of tournament matches sits just off that same seed, so it is *partially*
-  down-weighted too — its share scales as `matches / (matches + 5)` (a thin real Elo is
-  down-weighted the same way, by `plays / (plays + 5)`), and only a deep tournament
-  record earns its full weight.
-- **OTR itself is a moving, partial target.** It updates on a weekly cadence and
-  decays after about six months of tournament inactivity, so a player's tournament
-  axis can lag their current form. It also only counts *approved* matches —
-  qualifiers, scrims and unverified events don't register.
-- **The three-way weight split is debatable.** The board uses **equal base weights —
-  a third each** (`1/3` PP / `1/3` Elo / `1/3` OTR). Weighting the three axes the same
-  is a judgement call — a different split may be equally valid, or better.
-  (Reliability weighting means a player missing a real axis is scored on the other
-  two at the same relative ratio, rather than having a pp-derived placeholder
-  diluting the blend.)
-- **Normalization is relative to whoever is on the board.** Each axis is
-  standardized against this population, so a player's score shifts a little
-  whenever the board's makeup changes. That is the trade for measuring magnitude
-  on a common scale rather than blending raw, incomparable numbers — but it means
-  scores are standings within *this* sample, not absolute values.
-
-### Does a hybrid leaderboard even need to exist?
-
-If Elo were already an accurate representation of how players' skill levels
-compare, a hybrid leaderboard might not be needed at all. The two strongest
-arguments for its existence are:
-
-1. **PP is a good gauge of raw mechanical skill,** which is important in osu! and
-   deserves to be accounted for.
-2. **osu! is primarily a single-player experience.** Even in tournaments,
-   players never interact during gameplay — each one plays alone, and the winner
-   is decided by comparing scores. By
-   [Chris Crawford](https://en.wikipedia.org/wiki/Chris_Crawford_(game_designer))'s
-   definition, that makes a tournament match a *competition* rather than a *game*
-   (though it is, of course, still a video game). Since results come from each
-   player's *own* performance and not from direct play against an opponent, a
-   purely head-to-head rating like Elo can't tell the whole story by itself — so
-   blending in PP, a measure of that individual performance, is justified. One
-   could object that players *do* interact: they ban and pick beatmaps against
-   their opponent in tournaments and ranked play. But that's a meta-game layered
-   on top — the core gameplay loop, clicking circles to the beat for a high
-   score, plays out in isolation and is unaffected by it.
+  / `fetch_otr_leaderboard` are defined. They mirror `osu-tournament-rating/otr-processor`.
 
 ---
 

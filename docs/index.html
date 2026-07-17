@@ -215,7 +215,7 @@
       <strong><a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a></strong>),
       weighted equally on one shared scale. A player must carry at least one
       <strong>real</strong> Elo or OTR to appear. Elo and OTR are both
-      <strong>down-weighted</strong> when little play backs them — a low-match Elo or a
+      <strong>down-weighted</strong> when little play backs them. A low-match Elo or a
       thin-record OTR counts for less, so the score leans on the better-established
       measures.
     </p>
@@ -231,68 +231,68 @@
           board: <code>z(x) = (x − mean) / std</code>, measured over everyone on
           the board (PP is logged first because it is heavily skewed). That puts
           all three on the same <em>standard-deviations-from-average</em> scale,
-          so a place gained on one axis is worth the same as on another — and the
-          blend tracks <em>magnitude</em>, not just ordinal rank. The three axes carry
-          <strong>equal weight — a third each</strong>; this is the <em>base</em> split,
+          so a place gained on one axis is worth the same as on another, and the
+          blend tracks <em>magnitude</em> rather than ordinal rank. The three axes carry
+          <strong>equal weight, a third each</strong>. This is the <em>base</em> split,
           used when all three axes are real.
-          <strong>OTR</strong> is a real tournament rating; players with no
+          <strong>OTR</strong> is a real tournament rating. Players with no
           tournament history instead get an <strong>estimate</strong> seeded from
           their osu! rank (OTR's own starting formula), marked with a
           <strong>tilde (<span style="color:var(--accent)">~</span>)</strong>.
           An estimated axis (a seeded OTR, or a PP-seeded Elo marked
           <strong><span style="color:var(--accent)">^</span></strong>) carries no
-          information of its own — a seeded OTR is essentially osu! rank in
-          disguise — so it is dropped to <strong>zero weight</strong> and its share
+          information of its own. A seeded OTR is little more than osu! rank in
+          disguise, so it is dropped to <strong>zero weight</strong> and its share
           is redistributed to the player's real axes. That stops an estimate from
-          quietly counting PP twice; a player with a real Elo but a seeded OTR is
+          counting PP twice: a player with a real Elo but a seeded OTR is
           scored on roughly <code>half z(log pp) + half z(elo)</code>. Zero weight here means only that the seed adds nothing to
-          <em>that player's own</em> blend; the seeded value is still kept because
+          <em>that player's own</em> blend. The seeded value is still kept because
           each axis is standardized over the <strong>whole board, seeds
           included</strong>, so it helps set the average and spread every real
           rating is measured against. Blanking the seeds would shift that baseline
           and re-rank the board, which is why they stay. Each <em>real</em> axis is
-          likewise trusted in proportion to the play behind it — a real Elo's weight
+          likewise trusted in proportion to the play behind it: a real Elo's weight
           scales as <code>plays / (plays + 5)</code> and a real OTR's as
-          <code>matches / (matches + 5)</code> — so a thin record (barely off its ~PP
+          <code>matches / (matches + 5)</code>, so a thin record (barely off its ~PP
           seed) leans on the other axes, while a deep one earns close to its full
           share. The
           three <strong>vs</strong> columns (<strong>vs pp</strong>,
           <strong>vs elo</strong>, <strong>vs otr</strong>) show how many places a
           player gained (green ▴) or lost (red ▾) versus that one axis's rank alone
           (— when that axis is seeded, so there's no real rank to compare against).
-          A big <strong>vs&nbsp;pp</strong> gain — tens of thousands of places — is
-          <em>signal, not a glitch</em>: it flags a strong tournament or Ranked-Play
+          A big <strong>vs&nbsp;pp</strong> gain, tens of thousands of places, is
+          real <em>signal</em>: it flags a strong tournament or Ranked-Play
           player whose PP rank is deep only because they don't farm PP. The largest
           jumps are the <em>most</em>-confident competitive players (the board showing
-          what PP misses); the genuinely low-confidence players sit near the bottom
+          what PP misses), while the low-confidence players sit near the bottom
           with much smaller deltas.
           An
           <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>
           next to a player's <strong>Elo</strong> marks a <strong>provisional</strong>
-          rating — osu! considers it not yet stable because the player has too few
+          rating that osu! considers not yet stable, because the player has too few
           recent Ranked Play matches. Click any column header to sort.
         </p>
         <p class="formula-label">How low-play Elos are handled (reliability weighting)</p>
         <p class="sub">
-          osu!'s Ranked-Play "Elo" is not a raw number to be corrected — it is an
+          osu!'s Ranked-Play "Elo" is not a raw number waiting to be corrected. It is an
           <strong>OpenSkill posterior seeded from a PP estimate</strong> the first time
           you queue, then updated each match. So a low-match Elo already sits near that
-          PP seed and drifts to the player's own level as games accrue — structurally
-          the same object as OTR (seeded from rank). We therefore <strong>use the Elo
-          at its own value and never edit it</strong>; instead its <strong>weight</strong>
+          PP seed and drifts to the player's own level as games accrue, the
+          same kind of object as OTR (seeded from rank). We therefore <strong>use the Elo
+          at its own value and never edit it</strong>. Instead its <strong>weight</strong>
           in the score scales with match count:
           <code>weight = base × plays / (plays + 5)</code>. A one-match Elo counts
-          little (the score leans on PP and OTR); by a few dozen matches it earns close
+          little (the score leans on PP and OTR). By a few dozen matches it earns close
           to its full share. Because every Elo is weighted this way there's no per-row
-          symbol — instead <strong>hover any Elo number</strong> to see the match count
+          symbol, so <strong>hover any Elo number</strong> to see the match count
           behind it. A player with <em>no</em> real Elo gets the PP-seed value at
           <strong>zero weight</strong>, marked with a
-          <strong>caret (<span style="color:var(--accent)">^</span>)</strong>; a
-          provisional rating (osu! flags it unstable — too few recent matches) keeps
+          <strong>caret (<span style="color:var(--accent)">^</span>)</strong>. A
+          provisional rating (osu! flags it unstable, too few recent matches) keeps
           its <strong>asterisk (<span style="color:var(--accent)">*</span>)</strong>.
         </p>
         <p class="sub">
-          <strong>Does Elo even carry real skill signal — and why 5?</strong> Using
+          <strong>Does Elo even carry real skill signal, and why 5?</strong> Using
           <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a>
           as an independent yardstick (it shares no data with Ranked Play or PP), a
           real Elo's agreement with OTR <em>climbs with match count</em>: a thin Elo
@@ -300,81 +300,81 @@
           ahead (its Elo↔OTR correlation rises from about <code>0.5</code> to about
           <code>0.7</code>). So Elo earns its place as an axis. The <code>5</code> in
           the weight taper, though, is a <strong>conventional reliability
-          constant</strong>, not a derived threshold — in fact on the published board
+          constant</strong> rather than a derived threshold. On the published board
           <em>full</em> weight is marginally the most accurate choice (a real Elo and
           PP are complementary, so down-weighting a thin Elo just leans on PP, which
-          its seed already duplicates). The taper is a deliberate, standard hedge: it
+          its seed already duplicates). The taper is a standard hedge: it
           damps small-sample luck and gives a smooth ramp off the zero-weighted seed,
-          applied the same way to Elo and OTR. None of this rests on trust — it is
+          applied the same way to Elo and OTR. You don't have to take this on trust. It is
           reproducible straight from the published leaderboard, and the
           <a href="https://github.com/Acnuma/osu-hybrid-rank-system" target="_blank" rel="noopener">repository</a>
           ships the small script that recomputes the correlations and tests.
         </p>
         <p class="sub">
-          <strong>Elo and OTR are treated identically — because they are the same kind
+          <strong>Elo and OTR are treated identically, because they are the same kind
           of thing.</strong> Both are
           <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OpenSkill</a>
           posteriors seeded from a prior (Elo from a PP estimate, OTR from osu! rank)
           that washes out as play accrues. So neither rating's <strong>value</strong>
-          is ever edited — we show each axis's own number — and all the reliability
+          is ever edited (we show each axis's own number), and all the reliability
           handling lives in the <strong>weight</strong>: a thin rating on either axis
           keeps its exact number but <em>counts for less</em> until enough play backs
           it, and a fully-seeded axis (no real play at all) gets zero weight. That
-          symmetry is the whole point: there is no "raw Elo versus Bayesian OTR"
+          symmetry matters: there is no "raw Elo versus Bayesian OTR"
           distinction to justify handling them differently, because <em>both</em> are
           already Bayesian, seeded posteriors.
         </p>
         <p class="sub">
-          <strong>One honesty note:</strong> the same <code>5</code> is used for both
+          <strong>One caveat:</strong> the same <code>5</code> is used for both
           axes by convention, not because each was independently pinned to that value.
-          The data actually says the accuracy-optimal weight is close to <em>full</em>
-          for both (the taper is a robustness hedge, not a tuned optimum), and there is
+          The data says the accuracy-optimal weight is close to <em>full</em>
+          for both (the taper is a robustness hedge rather than a tuned optimum), and there is
           no clean way to fit a separate reliability point per axis without
-          circularity. So <code>evidence / (evidence + 5)</code> is a principled,
-          conservative default — not a precisely-measured threshold.
+          circularity. So <code>evidence / (evidence + 5)</code> is a reasonable,
+          cautious default rather than a measured threshold.
         </p>
         <p class="formula-label">Biggest limitations</p>
         <ul class="limitations">
           <li>
             <strong>Elo is still inaccurate because too few players queue.</strong>
-            For Elo to be meaningful, players — especially those at the top —
+            For Elo to be meaningful, players (especially those at the top)
             need to play ranked matches relatively frequently. (This assumes the
-            Elo system itself is reliable — it is brand new and still under active
+            Elo system itself is reliable, and it is brand new and still under active
             development.) The reliability weighting above softens this, but it cannot
             manufacture data that isn't there.
           </li>
           <li>
             <strong>Thin ratings lean on PP, which can under-sell a genuine
             over-performer.</strong> Down-weighting a low-match Elo (or OTR) shifts a
-            player's score toward the axes that <em>are</em> well-backed — chiefly PP.
+            player's score toward the axes that <em>are</em> well-backed, mostly PP.
             So someone far better in matches than their PP suggests, with only a
             handful of games, is scored more conservatively than they deserve until
             they rack up play. Full weight would rank them more accurately on average,
-            but at the cost of trusting genuine flukes; the reliability taper is the
-            deliberately conservative choice.
+            but at the cost of trusting flukes. The reliability taper is the
+            cautious choice.
           </li>
           <li>
             <strong>The pools it draws from stop at 10,000.</strong> The board is the
-            union of the PP top-10k, the Ranked Play top-10k, and the OTR top-10k —
-            each leaderboard stops at 10k — so a player ranked outside <em>all three</em>
+            union of the PP top-10k, the Ranked Play top-10k, and the OTR top-10k
+            (each leaderboard stops at 10k), so a player ranked outside <em>all three</em>
             pools never appears, even if their hybrid score would place them. Every
             hybrid rank is a standing <em>within this union sample</em> rather than a
             true global one. Adding the OTR pool now surfaces tournament-only players
             who don't grind PP or queue ranked play.
           </li>
           <li>
-            <strong>About a third of this board's OTR ratings are estimates, not real ones.</strong>
+            <strong>About a third of this board's OTR ratings are estimates rather than real ones.</strong>
             <a href="https://otr.stagec.net/leaderboard" target="_blank" rel="noopener">OTR</a>
-            only rates players who have competed in verified tournaments — about
+            only rates players who have competed in verified tournaments, about
             two-thirds of the board. Everyone else gets a rating <em>seeded from their
             osu! rank</em> (marked <span style="color:var(--accent)">~</span>),
-            which is just OTR's starting prior, not evidence of actual tournament
+            which is just OTR's starting prior and carries no evidence of actual tournament
             results. These seeded values are <strong>kept out of a player's own weighted blend</strong>
-            (zero weight, redistributed to the player's real axes) precisely because
-            they'd otherwise just re-count PP — they're still shown for context, so
-            for those players the OTR column is shown for reference, but it is <em>not</em> inert: each axis is standardized over the whole board, so the seed still feeds that axis's mean and spread (the scale every real rating is judged against). A <em>real</em>
+            (zero weight, redistributed to the player's real axes) because
+            they'd otherwise just re-count PP. They are still shown for context, but
+            the OTR column is <em>not</em> inert: each axis is standardized over the whole board, so the seed still feeds that axis's mean and spread (the scale every real rating is judged against). A <em>real</em>
             OTR backed by only a handful of tournament matches sits just off that
-            same seed, so it is <em>partially</em> down-weighted too — its share
+            same seed, so it is <em>partially</em> down-weighted too. Its share
             scales as <code>matches / (matches + 5)</code> (a thin real Elo is
             down-weighted the same way, by <code>plays / (plays + 5)</code>), and only
             a deep record earns its full weight.
@@ -383,13 +383,13 @@
             <strong>OTR itself is a moving, partial target.</strong> It updates
             on a weekly cadence and decays after about six months of tournament
             inactivity, so a player's tournament axis can lag their current form.
-            It also only counts <em>approved</em> matches — qualifiers, scrims and
+            It also only counts <em>approved</em> matches: qualifiers, scrims and
             unverified events don't register.
           </li>
           <li>
             <strong>The three-way weight split is debatable.</strong> The board
-            uses <strong>equal base weights — a third each</strong>,
-            weighting the three axes the same. That balance is a judgement call —
+            uses <strong>equal base weights, a third each</strong>,
+            weighting the three axes the same. That balance is a judgement call, and
             a different split may be equally valid, or better. (Reliability
             weighting means a player missing a real axis is scored on the other two
             at the same relative ratio, rather than having a PP-derived placeholder
@@ -399,9 +399,9 @@
             <strong>Normalization is relative to whoever is on the board.</strong>
             Each axis is standardized against this population, so a player's score
             shifts a little whenever the board's makeup changes. That is the
-            trade for measuring magnitude on a common scale rather than blending
-            raw, incomparable numbers — but it means scores are standings within
-            <em>this</em> sample, not absolute values.
+            price of measuring magnitude on a common scale rather than blending
+            raw, incomparable numbers. It means scores are standings within
+            <em>this</em> sample rather than absolute values.
           </li>
         </ul>
         <p class="formula-label">Does a hybrid leaderboard even need to exist?</p>
@@ -417,33 +417,33 @@
           </li>
           <li>
             <strong>osu! is primarily a single-player experience.</strong>
-            Even in tournaments, players never interact during gameplay — each
+            Even in tournaments, players never interact during gameplay: each
             one plays alone, and the winner is decided by comparing scores. By
             <a href="https://en.wikipedia.org/wiki/Chris_Crawford_(game_designer)" target="_blank" rel="noopener">Chris Crawford</a>'s
             definition, that makes a tournament match a <em>competition</em>
-            rather than a <em>game</em> (though it is, of course, still a video
+            rather than a <em>game</em> (though it is still a video
             game). Since results come from each player's <em>own</em> performance
             and not from direct play against an opponent, a purely head-to-head
-            rating like Elo can't tell the whole story by itself — so blending in
+            rating like Elo can't tell the whole story by itself, so blending in
             PP, a measure of that individual performance, is justified. One could
             object that players <em>do</em> interact: they ban and pick beatmaps
-            against their opponent in tournaments and ranked play. But that's a
-            meta-game layered on top — the core gameplay loop, clicking circles to
+            against their opponent in tournaments and ranked play. But that is a
+            meta-game layered on top. The core gameplay loop, clicking circles to
             the beat for a high score, plays out in isolation and is unaffected by
             it.
           </li>
           <li>
             <strong>The three axes reward different habits, not the same skill three
-            times.</strong> PP accrues almost passively — it counts whether or not a
-            player ever touches multiplayer, and stops only if they deliberately opt
+            times.</strong> PP accrues almost passively: it counts whether or not a
+            player ever touches multiplayer, and stops only if they opt
             out (unranked mods, or playing offline). Ranked Play is the competitive
             middle ground: quick, semi-random matches a few minutes long that reward
             skill without demanding much dedication. Tournaments sit at the structured
-            end — pools announced in advance, time to prepare and strategize, matches
+            end, with pools announced in advance, time to prepare and strategize, and matches
             drawn out over weeks. Because each axis rewards a different commitment,
             players skew toward one: a PP grinder who never enters a bracket, or a
             tournament specialist with a modest PP rank, is real skill that any
-            <em>single</em> axis — Elo included — leaves on the table.
+            <em>single</em> axis (Elo included) leaves on the table.
           </li>
         </ol>
         <p class="sub">
@@ -494,15 +494,15 @@
 
   <section class="wrap calc-only">
     <p class="sub calc-intro">
-      Compute a player's <strong>hybrid score</strong> — higher is better. Enter a
-      player's three raw values; each is <strong>standardized</strong> against the
+      Compute a player's <strong>hybrid score</strong> (higher is better). Enter a
+      player's three raw values. Each is <strong>standardized</strong> against the
       live board (its mean and standard deviation come from the latest data) and
-      blended with the weights below — pre-filled with the board's
-      (<strong id="c-w-label">0.33 PP / 0.33 Elo / 0.33 OTR</strong>), but adjust
+      blended with the weights below, pre-filled with the board's
+      (<strong id="c-w-label">0.33 PP / 0.33 Elo / 0.33 OTR</strong>), though you can adjust
       them to see how a different split would rank players. PP is logged
-      before standardizing. (This treats all three values as <em>real</em>, fully backed ratings;
-      on the board itself an <em>estimated</em> axis is dropped to zero weight, and a
-      thin real axis — a low-match Elo or OTR — is partially down-weighted, with its
+      before standardizing. (This treats all three values as <em>real</em>, fully backed ratings.
+      On the board itself an <em>estimated</em> axis is dropped to zero weight, and a
+      thin real axis, a low-match Elo or OTR, is partially down-weighted, with its
       share redistributed to the player's real axes.)
     </p>
     <div class="calc">
