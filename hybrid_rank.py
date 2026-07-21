@@ -782,10 +782,11 @@ class Row:
 @dataclass
 class Filters:
     """Data-quality / presentation knobs applied when assembling the board."""
-    min_plays: int = 1            # drop players with fewer ranked-play matches
+    min_plays: int = 0            # >0: drop players with fewer ranked-play matches
     exclude_provisional: bool = False  # drop players osu! flags as provisional
     top_k: int | None = None      # keep only the best-K rows after scoring
     min_otr_matches: int = 0      # >0: keep only players with a REAL OTR of >= N matches
+    exclude_seeded: bool = False  # keep only players whose Elo AND OTR are both real
 
     def keep_player(self, plays: int, provisional: bool) -> bool:
         if plays < self.min_plays:
@@ -836,20 +837,44 @@ def _effective_weights(r: Row) -> tuple[float, float, float]:
     return w_pp / total, w_elo / total, w_otr / total
 
 
-def _apply_otr_floor(rows: list[Row], filt: Filters) -> list[Row]:
-    """Opt-in tournament floor (--min-otr-matches): keep only players whose OTR is
-    real and backed by >= filt.min_otr_matches matches. Applied BEFORE normalization
-    so the surviving cohort is scored against itself (symmetric with --min-plays).
-    A no-op at the default 0, so the standard board is unaffected."""
-    n = filt.min_otr_matches
-    if n <= 0:
+def _apply_filters(rows: list[Row], filt: Filters) -> list[Row]:
+    """Opt-in row-level exclusion filters, applied BEFORE normalization on every
+    anchor so the surviving cohort is scored and ranked against itself. Every rule is
+    a no-op at its default, so an unflagged board is unaffected. A row is dropped if it
+    fails any active rule:
+
+      --exclude-provisional  drop osu!-provisional Elos
+      --min-plays N          drop real ranked-play match count < N (a seeded Elo has
+                             0 plays, so N>=1 also removes OTR-only players)
+      --min-otr-matches N    drop seeded OTR, or a real OTR with < N tournament matches
+      --exclude-seeded       drop any player whose Elo or OTR is seeded (keep all-real;
+                             pp is always real)
+    """
+    n_plays = filt.min_plays
+    n_otr = filt.min_otr_matches
+    if not (filt.exclude_provisional or n_plays > 0 or n_otr > 0 or filt.exclude_seeded):
         return rows
-    before = len(rows)
-    rows = [r for r in rows if not r.otr_estimated and r.matches_played >= n]
-    print(f"      --min-otr-matches {n}: kept {len(rows)} of {before} "
-          f"(dropped {before - len(rows)} seeded or < {n} OTR matches)",
-          file=sys.stderr)
-    return rows
+
+    reasons = {"provisional": 0, "min-plays": 0, "min-otr-matches": 0, "seeded": 0}
+    kept: list[Row] = []
+    for r in rows:
+        if filt.exclude_provisional and r.provisional:
+            reasons["provisional"] += 1
+        elif n_plays > 0 and r.plays < n_plays:
+            reasons["min-plays"] += 1
+        elif n_otr > 0 and (r.otr_estimated or r.matches_played < n_otr):
+            reasons["min-otr-matches"] += 1
+        elif filt.exclude_seeded and (r.elo_estimated or r.otr_estimated):
+            reasons["seeded"] += 1
+        else:
+            kept.append(r)
+
+    dropped = len(rows) - len(kept)
+    if dropped:
+        detail = ", ".join(f"{k} {v}" for k, v in reasons.items() if v)
+        print(f"      filters: kept {len(kept)} of {len(rows)} "
+              f"(dropped {dropped}: {detail})", file=sys.stderr)
+    return kept
 
 
 def normalize_and_score(rows: list[Row]) -> dict:
@@ -931,7 +956,7 @@ def _assemble(cand: list[Candidate], otr_key: str | None, use_cache: bool,
                         estimated, tp, plays, prov, otr_rank=otr_rank,
                         matches_played=mp))
 
-    rows = _apply_otr_floor(rows, filt)
+    rows = _apply_filters(rows, filt)
     norm = normalize_and_score(rows)
     rows, trimmed = _finalize(rows, filt)
     return rows, norm, trimmed
@@ -1136,12 +1161,15 @@ def build_union(use_cache: bool, rp_max_pages: int | None, filt: Filters,
                         otr_rating, otr_est, tp, plays, prov,
                         elo_estimated=elo_est, otr_rank=otr_rank, matches_played=mp))
 
-    rows = _apply_otr_floor(rows, filt)
+    before_filters = len(rows)
+    rows = _apply_filters(rows, filt)
+    filtered = before_filters - len(rows)
     norm = normalize_and_score(rows)
     rows, trimmed = _finalize(rows, filt)
     real_otr = sum(1 for r in rows if not r.otr_estimated)
     seed_elo = sum(1 for r in rows if r.elo_estimated)
-    print(f"      ranked {len(rows)} | skipped {no_pp} (no pp) | trimmed {trimmed} "
+    print(f"      ranked {len(rows)} | skipped {no_pp} (no pp) | "
+          f"filtered {filtered} | trimmed {trimmed} "
           f"(top-k) | {real_otr} real OTR | {seed_elo} seeded Elo",
           file=sys.stderr)
     on_board_recruits = sum(1 for r in rows if r.user_id in recruited)
@@ -1200,6 +1228,7 @@ def _write_meta(csv_path: str, rows: list[Row], norm: dict,
         payload["exclude_provisional"] = filt.exclude_provisional
         payload["top_k"] = filt.top_k
         payload["min_otr_matches"] = filt.min_otr_matches
+        payload["exclude_seeded"] = filt.exclude_seeded
     if extra:
         payload.update(extra)   # anchor, elo_prior, ...
     with open(meta_path, "w", encoding="utf-8") as fh:
@@ -1291,14 +1320,15 @@ def main() -> None:
                     help="cap ranked-play pages scanned (players beyond the cap "
                          "are treated as unranked). Default: scan until all "
                          "target players are found or the board ends")
-    ap.add_argument("--min-plays", type=int, default=1, metavar="N",
-                    help="(pp/rankedplay anchors only) drop players with fewer than N "
-                         "ranked-play matches. Default 1 (off). The union anchor does "
-                         "NOT hard-cut on play count -- it weight-tapers a low-play Elo "
-                         "by plays/(plays+5) instead, leaning on the other axes.")
+    ap.add_argument("--min-plays", type=int, default=0, metavar="N",
+                    help="(all anchors) drop players with fewer than N ranked-play "
+                         "matches. Default 0 (off). On the union anchor a seeded Elo has "
+                         "0 plays, so any N>=1 also drops OTR-only players; without this "
+                         "flag the union anchor weight-tapers low-play Elos by "
+                         "plays/(plays+5) instead of cutting them.")
     ap.add_argument("--exclude-provisional", action="store_true",
-                    help="drop players osu! flags as provisional (rating not yet "
-                         "stable). Off by default: provisional players are kept "
+                    help="(all anchors) drop players osu! flags as provisional (rating "
+                         "not yet stable). Off by default: provisional players are kept "
                          "and marked in the 'provisional' CSV column instead.")
     ap.add_argument("--top-k", type=int, default=None, metavar="K",
                     help="presentation cap: after scoring, keep only the best K "
@@ -1308,6 +1338,11 @@ def main() -> None:
                          "REAL OTR rating backed by >= N tournament matches, dropping "
                          "seeded and thin-OTR players. Applied BEFORE normalization, so "
                          "survivors are scored against this cohort. Default 0 (off).")
+    ap.add_argument("--exclude-seeded", action="store_true",
+                    help="(all anchors) keep only players whose Elo AND OTR are both "
+                         "real, dropping any pp-seeded Elo or rank-seeded OTR (pp is "
+                         "always real). Applied BEFORE normalization, so survivors are "
+                         "scored against this fully-backed cohort. Off by default.")
     ap.add_argument("--w-pp", type=float, default=W_PP, metavar="0..1",
                     help=f"weight on pp performance (default {W_PP:.4g})")
     ap.add_argument("--w-elo", type=float, default=W_ELO, metavar="0..1",
@@ -1326,8 +1361,8 @@ def main() -> None:
     W_ELO = args.w_elo
     W_OTR = 1.0 - W_PP - W_ELO
 
-    if args.min_plays < 1:
-        ap.error(f"--min-plays must be >= 1 (got {args.min_plays})")
+    if args.min_plays < 0:
+        ap.error(f"--min-plays must be >= 0 (got {args.min_plays})")
     if args.top_k is not None and args.top_k < 1:
         ap.error(f"--top-k must be >= 1 (got {args.top_k})")
     if args.min_otr_matches < 0:
@@ -1340,7 +1375,8 @@ def main() -> None:
     filt = Filters(min_plays=args.min_plays,
                    exclude_provisional=args.exclude_provisional,
                    top_k=top_k,
-                   min_otr_matches=args.min_otr_matches)
+                   min_otr_matches=args.min_otr_matches,
+                   exclude_seeded=args.exclude_seeded)
 
     # --otr: absent -> seed-only; bare -> key from OTR_API_KEY env; with a value
     # -> that key. The key is never printed.

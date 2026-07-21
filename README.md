@@ -281,16 +281,18 @@ there is no non-circular way to fit a separate reliability point per axis, so
 
 ### Data-quality filters
 
-The **union** anchor handles Elo noise with reliability weighting (above), not a cutoff, so it
-takes the cap and provisional knobs but ignores `--min-plays`. The two legacy
-anchors (`pp`/`rankedplay`) honor all three. All are **off by default**.
+All filters below are **off by default**. When set, they apply to **every anchor**
+(including the default `union` board) and run **before** scoring, so the surviving
+players are normalized and ranked against each other. Left unset, the union anchor
+leans on reliability weighting rather than cutting.
 
 | Flag | Default | Effect |
 |---|---|---|
-| `--top-k K` | union: `10000`, else off | After scoring, keep only the best **K** players — a presentation trim, not a re-ranking. The union anchor defaults this to 10,000 (osu! only ranks the top 10k anyway). |
-| `--exclude-provisional` | off | Drop players whose rating osu! flags as **provisional** ("too few recent matches"). Off by default — provisional players are **kept and marked** instead. |
-| `--min-plays N` | `1` (off) | **(pp/rankedplay only)** Drop players with fewer than **N** ranked-play matches. The union anchor weight-tapers low-play Elos instead, so this does nothing there. |
-| `--min-otr-matches N` | `0` (off) | **(all anchors)** Keep only players with a **real OTR** rating backed by **≥ N** tournament matches — drops seeded and thin-OTR players for a tournament-focused board. Applied **before** normalization, so survivors are scored against this cohort, not the full board. (The taper already down-weights thin OTR; this hard-excludes it.) |
+| `--top-k K` | union: `10000`, else off | After scoring, keep only the best **K** players (a presentation trim, applied after everything else). The union anchor defaults this to 10,000 (osu! only ranks the top 10k anyway). |
+| `--exclude-provisional` | off | **(all anchors)** Drop players whose rating osu! flags as **provisional** ("too few recent matches"). Off by default, so provisional players are otherwise **kept and marked**. |
+| `--min-plays N` | `0` (off) | **(all anchors)** Drop players with fewer than **N** ranked-play matches. A seeded Elo has 0 plays, so on the union board any **N ≥ 1** also drops OTR-only players. Left unset, the union anchor weight-tapers low-play Elos instead of cutting them. |
+| `--min-otr-matches N` | `0` (off) | **(all anchors)** Keep only players with a **real OTR** rating backed by **≥ N** tournament matches, dropping seeded and thin-OTR players for a tournament-focused board. Applied **before** normalization, so survivors are scored against this cohort. (The taper already down-weights thin OTR; this hard-excludes it.) |
+| `--exclude-seeded` | off | **(all anchors)** Keep only players whose **Elo and OTR are both real**, dropping any pp-seeded Elo or rank-seeded OTR (pp is always real). Applied **before** normalization, so survivors are scored against this fully-backed cohort. |
 
 The ranked-play board exposes each player's **play count**, **provisional flag**,
 and **elo rating** in bulk (no extra fetch), so these cost nothing. `plays` and
@@ -305,6 +307,9 @@ python hybrid_rank.py --offline                                  # pure recomput
 python hybrid_rank.py --offline --w-pp 0.4 --w-elo 0.3           # try different weights (OTR gets the remainder)
 python hybrid_rank.py --offline --top-k 1000                     # show only the best 1000
 python hybrid_rank.py --offline --min-otr-matches 5             # tournament-only: real OTR with >=5 matches
+python hybrid_rank.py --offline --exclude-seeded                # only players with all three axes real (pp+elo+otr)
+python hybrid_rank.py --offline --min-plays 20                  # require >=20 real ranked-play matches
+python hybrid_rank.py --offline --exclude-seeded --min-plays 20 --min-otr-matches 10 --exclude-provisional  # strict, fully-backed board
 python hybrid_rank.py --anchor rankedplay --top 10000 --otr <key># legacy: ranked-play-only board
 python hybrid_rank.py --anchor pp --top 10000                    # legacy: PP-only board (the PP max -- see cap)
 python hybrid_rank.py --no-cache                                 # force a fresh pull
