@@ -41,7 +41,10 @@ real OTR). A real Elo is used at its own posterior value; a player with no real 
 gets a pp-seed value (zero-weighted, so it only feeds the axis's normalization, never
 that player's own blend). See the ELO_RELIABILITY_K note below.
 
-Pure standard library -- no pip installs required.
+Pure standard library -- no pip installs required. `pip install curl_cffi` is
+recommended though: osu.ppy.sh sits behind Cloudflare bot-fight mode and serves
+HTTP 403 challenges to plain Python TLS fingerprints; curl_cffi impersonates a
+real browser's TLS and gets through.
 """
 
 from __future__ import annotations
@@ -63,6 +66,14 @@ import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from datetime import datetime, timezone
+
+try:  # optional dependency: curl_cffi impersonates a real browser's TLS
+    from curl_cffi import requests as _curl_requests  # fingerprint, which is what
+    from curl_cffi.requests.exceptions import (       # gets osu.ppy.sh through
+        RequestException as _CurlError)               # Cloudflare's bot challenge
+    _CURL_AVAILABLE = True                            # (plain urllib gets 403'd)
+except ImportError:
+    _curl_requests, _CurlError, _CURL_AVAILABLE = None, None, False
 
 # --------------------------------------------------------------------------- #
 # Configuration
@@ -198,64 +209,93 @@ def _throttle() -> None:
         _last_start[0] = time.monotonic()
 
 
-def _http_get(url: str) -> str:
+class _HTTPStatus(RuntimeError):
+    """A non-transient HTTP status reached after retries (carries code + body)."""
+
+    def __init__(self, code: int, body: bytes):
+        super().__init__(f"HTTP {code}")
+        self.code = code
+        self.body = body
+
+
+_tls = threading.local()
+
+
+def _curl_session():
+    """One curl_cffi Session per thread (Sessions are not thread-safe)."""
+    sess = getattr(_tls, "curl", None)
+    if sess is None:
+        sess = _tls.curl = _curl_requests.Session(impersonate="chrome")
+    return sess
+
+
+def _http_request(method: str, url: str, headers: dict, *,
+                  data: bytes | None = None, max_retries: int = MAX_RETRIES,
+                  wait_429: float | None = None) -> bytes:
+    """One HTTP request with retry/backoff and the global rate limit; returns the
+    raw body. Non-transient HTTP statuses raise _HTTPStatus; transient ones
+    (429/5xx) back off -- honoring Retry-After, then `wait_429` on 429, then
+    exponential. Runs through curl_cffi (browser-impersonated TLS; defeats the
+    Cloudflare bot challenge osu.ppy.sh serves to plain Python fingerprints) when
+    installed, else urllib."""
     if ALLOW_STALE:  # --offline: never touch the network
         raise RuntimeError(f"--offline set but not in cache: {url}")
-    req = urllib.request.Request(
-        url, headers={"User-Agent": USER_AGENT, "Accept-Language": "en"}
-    )
     last_err: Exception | None = None
-    for attempt in range(MAX_RETRIES):
+    for attempt in range(max_retries):
         _throttle()
         try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-                return r.read().decode("utf-8", "replace")
-        except urllib.error.HTTPError as e:
+            if _CURL_AVAILABLE:
+                # Don't send the script's static User-Agent here: it must match
+                # the impersonated TLS fingerprint or Cloudflare 403-challenges
+                # the request. curl_cffi supplies a consistent per-browser UA.
+                hdrs = {k: v for k, v in headers.items()
+                        if k.lower() != "user-agent"}
+                r = _curl_session().request(method, url, headers=hdrs,
+                                            data=data, timeout=REQUEST_TIMEOUT)
+                status, resp_headers, body = r.status_code, r.headers, r.content
+            else:
+                req = urllib.request.Request(url, data=data, headers=headers,
+                                             method=method)
+                with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
+                    status, resp_headers, body = r.status, r.headers, r.read()
+            if status < 400:
+                return body
+            last_err = _HTTPStatus(status, body)
+            if status not in (429, 500, 502, 503, 504):  # not transient -> give up
+                raise last_err
+            retry_after = str(resp_headers.get("Retry-After", "") or "")
+            if retry_after.isdigit():
+                delay = float(retry_after)
+            elif status == 429 and wait_429 is not None:  # no header -> wait it out
+                delay = wait_429 + random.uniform(0, 2)
+            else:
+                delay = (2 ** attempt) + random.uniform(0, 1)
+            time.sleep(delay)
+        except _CurlError as e:  # curl_cffi transport-level failure
             last_err = e
-            if e.code in (429, 500, 502, 503, 504):  # transient -> back off
-                time.sleep((2 ** attempt) + random.uniform(0, 1))
-                continue
-            raise
+            time.sleep((2 ** attempt) + random.uniform(0, 1))
         except (urllib.error.URLError, TimeoutError) as e:
             last_err = e
             time.sleep((2 ** attempt) + random.uniform(0, 1))
-    raise RuntimeError(f"GET failed after {MAX_RETRIES} tries: {url} ({last_err})")
+    raise RuntimeError(f"{method} failed after {max_retries} tries: {url} "
+                       f"({last_err})")
+
+
+def _http_get(url: str) -> str:
+    return _http_request(
+        "GET", url, {"User-Agent": USER_AGENT, "Accept-Language": "en"}
+    ).decode("utf-8", "replace")
 
 
 def _http_get_json(url: str, headers: dict, max_retries: int = MAX_RETRIES,
                    wait_429: float | None = None) -> object:
     """GET a URL with extra headers (e.g. Authorization) and return parsed JSON.
-    Same retry/backoff and global throttle as _http_get. Honors Retry-After on
-    429; when the server sends none, a 429 falls back to `wait_429` seconds (for
-    endpoints whose bucket needs a long, fixed recovery). The caller's headers
-    (e.g. the API key) are never logged."""
-    if ALLOW_STALE:  # --offline: never touch the network
-        raise RuntimeError(f"--offline set but not in cache: {url}")
-    req = urllib.request.Request(
-        url, headers={"User-Agent": USER_AGENT, "Accept": "application/json",
-                      **headers})
-    last_err: Exception | None = None
-    for attempt in range(max_retries):
-        _throttle()
-        try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-                return json.loads(r.read().decode("utf-8", "replace"))
-        except urllib.error.HTTPError as e:
-            last_err = e
-            if e.code not in (429, 500, 502, 503, 504):  # not transient -> give up
-                raise
-            retry_after = e.headers.get("Retry-After") if e.headers else None
-            if retry_after and retry_after.isdigit():
-                delay = float(retry_after)
-            elif e.code == 429 and wait_429 is not None:  # no header -> wait it out
-                delay = wait_429 + random.uniform(0, 2)
-            else:
-                delay = (2 ** attempt) + random.uniform(0, 1)
-            time.sleep(delay)
-        except (urllib.error.URLError, TimeoutError) as e:
-            last_err = e
-            time.sleep((2 ** attempt) + random.uniform(0, 1))
-    raise RuntimeError(f"GET failed after {max_retries} tries: {url} ({last_err})")
+    Same retry/backoff and global throttle as _http_get (see _http_request).
+    The caller's headers (e.g. the API key) are never logged."""
+    return json.loads(_http_request(
+        "GET", url, {"User-Agent": USER_AGENT, "Accept": "application/json",
+                     **headers}, max_retries=max_retries, wait_429=wait_429
+    ).decode("utf-8", "replace"))
 
 
 def _cache_path(key: str) -> str:
@@ -600,29 +640,24 @@ def osu_token(client_id: str, client_secret: str) -> str:
         raise RuntimeError("--offline set but osu! API token needs the network")
     body = json.dumps({"client_id": int(client_id), "client_secret": client_secret,
                        "grant_type": "client_credentials", "scope": "public"}).encode()
-    req = urllib.request.Request(
-        OSU_TOKEN_URL, data=body, method="POST",
-        headers={"User-Agent": USER_AGENT, "Accept": "application/json",
-                 "Content-Type": "application/json"})
-    last_err: Exception | None = None
-    for attempt in range(MAX_RETRIES):
-        _throttle()
-        try:
-            with urllib.request.urlopen(req, timeout=REQUEST_TIMEOUT) as r:
-                tok = json.loads(r.read().decode("utf-8", "replace")).get("access_token")
-            if not tok:
-                raise RuntimeError("osu! token response carried no access_token")
-            return tok
-        except urllib.error.HTTPError as e:  # 401 here = bad client id/secret
-            last_err = e
-            if e.code not in (429, 500, 502, 503, 504):
-                raise RuntimeError(f"osu! token request failed: HTTP {e.code} "
-                                   "(check OSU_CLIENT_ID / OSU_CLIENT_SECRET)")
-            time.sleep((2 ** attempt) + random.uniform(0, 1))
-        except (urllib.error.URLError, TimeoutError) as e:
-            last_err = e
-            time.sleep((2 ** attempt) + random.uniform(0, 1))
-    raise RuntimeError(f"osu! token request failed after {MAX_RETRIES} tries ({last_err})")
+    try:
+        payload = json.loads(_http_request(
+            "POST", OSU_TOKEN_URL, data=body,
+            headers={"User-Agent": USER_AGENT, "Accept": "application/json",
+                     "Content-Type": "application/json"}).decode("utf-8", "replace"))
+    except _HTTPStatus as e:
+        if e.code == 401:
+            hint = "check OSU_CLIENT_ID / OSU_CLIENT_SECRET"
+        elif e.code == 403 and not _CURL_AVAILABLE:
+            hint = ("osu.ppy.sh is behind Cloudflare bot-fight mode -- "
+                    "pip install curl_cffi and retry")
+        else:
+            hint = "check OSU_CLIENT_ID / OSU_CLIENT_SECRET or the network path"
+        raise RuntimeError(f"osu! token request failed: HTTP {e.code} ({hint})")
+    tok = payload.get("access_token")
+    if not tok:
+        raise RuntimeError("osu! token response carried no access_token")
+    return tok
 
 
 def fetch_pp_api(uids: list[int], osu_creds: tuple[str, str], use_cache: bool
